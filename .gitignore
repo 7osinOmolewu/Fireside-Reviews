@@ -24,12 +24,6 @@
 .DS_Store
 *.pem
 
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
 # env files (can opt-in for committing if needed)
 .env*
 
@@ -39,22 +33,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-
-# Node / Next
-node_modules
-.next
-dist
-
-# Supabase local
-supabase/.branches
-supabase/.temp
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-npm-debug.log*
 
 cat > .gitignore << 'EOF'
 # Node / Next
@@ -75,8 +53,9 @@ Get DB Schema.txt
 .DS_Store
 Thumbs.db
 
-# Logs
+# debug
 npm-debug.log*
 yarn-debug.log*
-pnpm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
 EOF
