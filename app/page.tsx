@@ -38,4 +38,20 @@ export default function Home() {
       </button>
     </main>
   );
+  <form action="/api/auth/logout" method="post">
+  <button
+    type="submit"
+    style={{
+      padding: "6px 10px",
+      fontSize: 13,
+      borderRadius: 8,
+      border: "1px solid #ddd",
+      background: "white",
+      cursor: "pointer",
+    }}
+  >
+    Log out
+  </button>
+</form>
+
 }

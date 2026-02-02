@@ -28,7 +28,7 @@ export default async function JobFamiliesPage() {
     return (
       <div className="p-6">
         <h1 className="text-xl font-semibold">Job Families</h1>
-        <p className="mt-3 text-red-600">{error.message}</p>
+        <div className="mt-3 text-red-600">{error.message}</div>
         <BackToAdmin />
         <p className="mt-3 text-red-600">{error.message}</p>
       </div>
@@ -42,7 +42,7 @@ export default async function JobFamiliesPage() {
       <div className="mt-6">
         <JobFamiliesTable rows={data ?? []} />
       </div>
-      <p style={{ marginTop: 24 }}><BackToAdmin /></p>
+      <div style={{ marginTop: 24 }}><BackToAdmin /></div>
     </div>
   );
 }

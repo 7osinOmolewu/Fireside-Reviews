@@ -48,19 +48,27 @@ export async function GET(request: Request) {
 
   // Ensure profile exists, but do NOT overwrite user_role if it already exists.
   // (Role source of truth is profiles.user_role, set by your invite/admin flows.)
-  const { data: existingProfile } = await supabase
+   // 1) Read profile if it exists (don't throw if missing)
+  const { data: existingProfile, error: existingErr } = await supabase
     .from("profiles")
     .select("user_role, full_name")
     .eq("id", user.id)
-    .single();
+    .maybeSingle();
+
+  if (existingErr) {
+    return NextResponse.redirect(
+      new URL(`/login?error=${encodeURIComponent(existingErr.message)}`, request.url)
+    );
+  }
 
   const fullName =
     existingProfile?.full_name ??
-    user.user_metadata?.full_name ??
-    user.user_metadata?.name ??
+    (user.user_metadata as any)?.full_name ??
+    (user.user_metadata as any)?.name ??
     user.email ??
     null;
 
+  // 2) Upsert identity fields only (do NOT overwrite user_role)
   const { error: upsertErr } = await supabase
     .from("profiles")
     .upsert(
@@ -68,7 +76,6 @@ export async function GET(request: Request) {
         id: user.id,
         email: user.email ?? null,
         full_name: fullName,
-        // NOTE: intentionally not setting user_role here
       },
       { onConflict: "id" }
     );
@@ -79,7 +86,24 @@ export async function GET(request: Request) {
     );
   }
 
-  // Redirect based on profiles.user_role (truth)
-  const role = existingProfile?.user_role ?? "employee";
-  return NextResponse.redirect(new URL(role === "admin" ? "/admin" : "/", request.url));
+  // 3) Re-fetch role AFTER upsert (authoritative)
+  const { data: profileAfter, error: afterErr } = await supabase
+    .from("profiles")
+    .select("user_role")
+    .eq("id", user.id)
+    .single();
+
+  if (afterErr) {
+    return NextResponse.redirect(
+      new URL(`/login?error=${encodeURIComponent(afterErr.message)}`, request.url)
+    );
+  }
+
+  const role = profileAfter?.user_role ?? "employee";
+
+  // 4) Route by role
+  const target =
+    role === "admin" ? "/admin" : role === "reviewer" ? "/reviews" : "/employee";
+
+  return NextResponse.redirect(new URL(target, request.url));
 }

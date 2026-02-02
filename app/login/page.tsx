@@ -15,7 +15,7 @@ export default function LoginPage() {
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: `${location.origin}/auth/callback`,
       },
     });
 
@@ -39,6 +39,7 @@ export default function LoginPage() {
           <label style={{ display: "block", marginTop: 12 }}>
             Work email
             <input
+              suppressHydrationWarning
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               type="email"

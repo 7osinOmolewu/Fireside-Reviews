@@ -1,50 +1,237 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { AssignmentPayload, RubricCategoryRow } from "@/lib/types/reviews";
 
 type ScoreRow = { key: string; label: string; score: number; weight: number | null };
 
+const SCORE_MIN = 0;
+const SCORE_MAX = 100;
+
+function asSingle<T>(v: any): T | null {
+  if (!v) return null;
+  return Array.isArray(v) ? (v[0] as T) : (v as T);
+}
+
+function safeString(v: any): string {
+  return typeof v === "string" ? v : "";
+}
+
 export default function ReviewForm({
   assignment,
   rubricCategories,
+  pendingAssignmentIds,
+  isPending,
 }: {
   assignment: AssignmentPayload;
   rubricCategories: RubricCategoryRow[];
+  pendingAssignmentIds: string[];
+  isPending: boolean;
 }) {
+  const router = useRouter();
+
   const assignmentId = assignment.id;
   const reviewerType = assignment.reviewer_type;
 
-  const existingReview = assignment.reviews?.[0] ?? null;
-  const existingScoreRow = existingReview?.review_scores?.[0] ?? null;
+  const reviewerLabel =
+    reviewerType === "primary"
+      ? "Primary Reviewer"
+      : reviewerType === "self"
+      ? "Self Review"
+      : reviewerType === "secondary"
+      ? "Secondary Reviewer"
+      : reviewerType === "peer"
+      ? "Peer Reviewer"
+      : String(reviewerType ?? "Reviewer");
 
+  const employeeRow = asSingle<any>((assignment as any).employees);
+  const profileRow = asSingle<any>(employeeRow?.profiles);
+  const employeeName = profileRow?.full_name?.trim() || profileRow?.email || "Employee";
+
+  const existingReview: any = (assignment as any).reviews?.[0] ?? null;
+  const reviewStatus = (existingReview?.status ?? "draft") as "draft" | "submitted";
+  const isLocked = reviewStatus === "submitted";
+
+  const existingScoreRow: any = existingReview?.review_scores?.[0] ?? null;
   const existingCategoryScores: Record<string, number> =
     (existingScoreRow?.category_scores as Record<string, number> | null) ?? {};
 
-  const [privateSummary, setPrivateSummary] = useState(
-    existingReview?.summary_reviewer_private ?? ""
-  );
-  const [employeeSummary, setEmployeeSummary] = useState(
-    existingReview?.summary_employee_visible ?? ""
-  );
-  const [saving, setSaving] = useState(false);
+  const canScore = reviewerType === "primary";
 
-  const initialScoreRows: ScoreRow[] = useMemo(() => {
+  const scoresFingerprint = useMemo(() => {
+    try {
+      return JSON.stringify(existingScoreRow?.category_scores ?? {});
+    } catch {
+      return "{}";
+    }
+  }, [existingScoreRow]);
+
+  const computedInitialScoreRows: ScoreRow[] = useMemo(() => {
     return (rubricCategories ?? [])
       .filter((c) => c.is_scored !== false)
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-      .map((c) => ({
-        key: c.code, // stable key for category_scores
-        label: c.name,
-        weight: c.weight ?? null,
-        score: Number(existingCategoryScores[c.code] ?? 0),
-      }));
-  }, [rubricCategories, existingReview?.id]);
+      .map((c) => {
+        const raw = Number(existingCategoryScores[c.code] ?? 0);
+        const clamped = Number.isFinite(raw)
+          ? Math.min(SCORE_MAX, Math.max(SCORE_MIN, raw))
+          : SCORE_MIN;
 
-  const [scoreRows, setScoreRows] = useState<ScoreRow[]>(initialScoreRows);
+        return { key: c.code, label: c.name, weight: c.weight ?? null, score: clamped };
+      });
+  }, [rubricCategories, scoresFingerprint]);
 
-  async function saveNarrative(submit: boolean) {
+  const initialScoreMapRef = useRef<Record<string, number>>({});
+  const initialPrivateRef = useRef<string>("");
+  const initialEmployeeRef = useRef<string>("");
+
+  const [privateSummary, setPrivateSummary] = useState(safeString(existingReview?.summary_reviewer_private));
+  const [employeeSummary, setEmployeeSummary] = useState(safeString(existingReview?.summary_employee_visible));
+  const [scoreRows, setScoreRows] = useState<ScoreRow[]>(computedInitialScoreRows);
+
+  const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (seededRef.current) return;
+    seededRef.current = true;
+
+    initialPrivateRef.current = safeString(existingReview?.summary_reviewer_private);
+    initialEmployeeRef.current = safeString(existingReview?.summary_employee_visible);
+    initialScoreMapRef.current = Object.fromEntries(
+      computedInitialScoreRows.map((r) => [r.key, r.score])
+    );
+  }, [existingReview, computedInitialScoreRows]);
+
+  const isDirty = useMemo(() => {
+    if (saving) return false;
+    if (isLocked) return false;
+
+    if (privateSummary !== initialPrivateRef.current) return true;
+    if (employeeSummary !== initialEmployeeRef.current) return true;
+
+    const initMap = initialScoreMapRef.current;
+    for (const r of scoreRows) {
+      const init = Number(initMap[r.key] ?? SCORE_MIN);
+      if (Number(r.score ?? SCORE_MIN) !== init) return true;
+    }
+    return false;
+  }, [privateSummary, employeeSummary, scoreRows, saving, isLocked]);
+
+   const isNarrativeDirty = useMemo(() => {
+    if (saving) return false;
+    if (isLocked) return false;
+    return (
+      privateSummary !== initialPrivateRef.current ||
+      employeeSummary !== initialEmployeeRef.current
+    );
+  }, [privateSummary, employeeSummary, saving, isLocked]);
+
+  const isScoresDirty = useMemo(() => {
+    if (saving) return false;
+    if (isLocked) return false;
+    if (!canScore) return false;
+
+    const initMap = initialScoreMapRef.current;
+    for (const r of scoreRows) {
+      const init = Number(initMap[r.key] ?? SCORE_MIN);
+      if (Number(r.score ?? SCORE_MIN) !== init) return true;
+    }
+    return false;
+  }, [scoreRows, saving, isLocked, canScore]);
+
+  // Rehydrate when server snapshot changes, but don't wipe local edits
+  const lastHydrateKeyRef = useRef<string>("");
+
+  const hydrateKey = useMemo(() => {
+    const rid = String(existingReview?.id ?? "");
+    const priv = safeString(existingReview?.summary_reviewer_private);
+    const emp = safeString(existingReview?.summary_employee_visible);
+    return `${assignmentId}|${rid}|${priv}|${emp}|${scoresFingerprint}|${reviewStatus}`;
+  }, [assignmentId, existingReview?.id, existingReview?.summary_reviewer_private, existingReview?.summary_employee_visible, scoresFingerprint, reviewStatus]);
+
+  useEffect(() => {
+    if (hydrateKey === lastHydrateKeyRef.current) return;
+
+    const nextPrivate = safeString(existingReview?.summary_reviewer_private);
+    const nextEmployee = safeString(existingReview?.summary_employee_visible);
+    const nextScores = computedInitialScoreRows;
+
+    // guard: if user typed and incoming is empty, don't wipe
+    const incomingHasAny = nextPrivate.trim().length > 0 || nextEmployee.trim().length > 0;
+    if (isDirty && !incomingHasAny) return;
+
+    setPrivateSummary(nextPrivate);
+    setEmployeeSummary(nextEmployee);
+    setScoreRows(nextScores);
+
+    initialPrivateRef.current = nextPrivate;
+    initialEmployeeRef.current = nextEmployee;
+    initialScoreMapRef.current = Object.fromEntries(nextScores.map((r) => [r.key, r.score]));
+
+    lastHydrateKeyRef.current = hydrateKey;
+    setErrorMsg(null);
+  }, [hydrateKey, computedInitialScoreRows, existingReview, isDirty]);
+
+  const nav = useMemo(() => {
+    const ids = pendingAssignmentIds ?? [];
+    const idx = ids.indexOf(assignmentId);
+
+    const prevId = idx > 0 ? ids[idx - 1] : null;
+    const nextId = idx >= 0 && idx < ids.length - 1 ? ids[idx + 1] : null;
+
+    return { idx, prevId, nextId, position: idx >= 0 ? idx + 1 : null, total: ids.length };
+  }, [pendingAssignmentIds, assignmentId]);
+
+  function confirmLeave(): boolean {
+    if (!isDirty) return true;
+    return window.confirm("You have unsaved changes. Leave this review without saving?");
+  }
+
+  function guardedPush(href: string) {
+    if (!confirmLeave()) return;
+    router.push(href);
+  }
+
+  const validation = useMemo(() => {
+    const missing: string[] = [];
+    if (!privateSummary.trim()) missing.push("Reviewer Narrative (Private)");
+    if (!employeeSummary.trim()) missing.push("Employee Summary (Visible)");
+
+    if (canScore) {
+      const scoredCats = (rubricCategories ?? []).filter((c) => c.is_scored !== false);
+      if (scoredCats.length > 0) {
+        for (const r of scoreRows) {
+          const v = Number(r.score);
+          if (!Number.isFinite(v)) missing.push(`Score: ${r.label}`);
+          else if (v < SCORE_MIN || v > SCORE_MAX)
+            missing.push(`Score range: ${r.label} (${SCORE_MIN}-${SCORE_MAX})`);
+        }
+      }
+    }
+
+    return { missing, ok: missing.length === 0 };
+  }, [privateSummary, employeeSummary, canScore, rubricCategories, scoreRows]);
+
+  function confirmCommit(): boolean {
+    if (!validation.ok) {
+      window.alert(
+        "Cannot commit yet. Please complete the following:\n\n" +
+          validation.missing.map((m) => `• ${m}`).join("\n")
+      );
+      return false;
+    }
+
+    return window.confirm(
+      "Commit this review?\n\nThis will lock both the narrative and scores. You will not be able to edit after commit."
+    );
+  }
+
+  async function saveNarrativeOnly() {
     setSaving(true);
+    setErrorMsg(null);
+
     try {
       const res = await fetch(`/api/reviews/${assignmentId}/narrative`, {
         method: "PUT",
@@ -52,20 +239,37 @@ export default function ReviewForm({
         body: JSON.stringify({
           summary_reviewer_private: privateSummary,
           summary_employee_visible: employeeSummary,
-          submit,
+          submit: false,
         }),
       });
 
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ? JSON.stringify(json.error) : "Failed");
-      alert(submit ? "Submitted narrative." : "Saved draft.");
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg =
+          json?.error?.message ??
+          json?.message ??
+          (typeof json?.error === "string" ? json.error : null) ??
+          "Failed";
+        setErrorMsg(msg);
+        return;
+      }
+
+      initialPrivateRef.current = privateSummary;
+      initialEmployeeRef.current = employeeSummary;
+
+      window.alert("Saved narrative.");
+      // IMPORTANT: no router.refresh() here; it can wipe state with an empty snapshot
     } finally {
       setSaving(false);
     }
   }
 
-  async function saveScores() {
+  async function saveScoresOnly() {
+    if (!canScore) return;
+
     setSaving(true);
+    setErrorMsg(null);
+
     try {
       const category_scores = Object.fromEntries(scoreRows.map((r) => [r.key, r.score]));
 
@@ -75,102 +279,386 @@ export default function ReviewForm({
         body: JSON.stringify({ category_scores }),
       });
 
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ? JSON.stringify(json.error) : "Failed");
-      alert("Saved scores.");
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg =
+          json?.error?.message ??
+          json?.message ??
+          (typeof json?.error === "string" ? json.error : null) ??
+          "Failed";
+        setErrorMsg(msg);
+        return;
+      }
+
+      initialScoreMapRef.current = Object.fromEntries(scoreRows.map((r) => [r.key, r.score]));
+      window.alert("Saved scores.");
+      router.refresh();
     } finally {
       setSaving(false);
     }
   }
 
-  const canScore = reviewerType === "primary";
+  async function commitReview() {
+    if (isLocked) return;
+    if (!confirmCommit()) return;
+
+    setSaving(true);
+    setErrorMsg(null);
+
+    try {
+      if (canScore) {
+        const category_scores = Object.fromEntries(scoreRows.map((r) => [r.key, r.score]));
+        const scoreRes = await fetch(`/api/reviews/${assignmentId}/scores`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ category_scores }),
+        });
+
+        const scoreJson = await scoreRes.json().catch(() => ({}));
+        if (!scoreRes.ok) {
+          const msg =
+            scoreJson?.error?.message ??
+            scoreJson?.message ??
+            (typeof scoreJson?.error === "string" ? scoreJson.error : null) ??
+            "Failed saving scores.";
+          setErrorMsg(msg);
+          return;
+        }
+      }
+
+      const narRes = await fetch(`/api/reviews/${assignmentId}/narrative`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          summary_reviewer_private: privateSummary,
+          summary_employee_visible: employeeSummary,
+          submit: true,
+        }),
+      });
+
+      const narJson = await narRes.json().catch(() => ({}));
+      if (!narRes.ok) {
+        const msg =
+          narJson?.error?.message ??
+          narJson?.message ??
+          (typeof narJson?.error === "string" ? narJson.error : null) ??
+          "Failed committing review.";
+        setErrorMsg(msg);
+        return;
+      }
+
+      initialPrivateRef.current = privateSummary;
+      initialEmployeeRef.current = employeeSummary;
+      initialScoreMapRef.current = Object.fromEntries(scoreRows.map((r) => [r.key, r.score]));
+
+      window.alert("Committed. This review is now locked.");
+      router.refresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const debugLine = useMemo(() => {
+    const rid = existingReview?.id ?? "none";
+    const hasPrivate = safeString(existingReview?.summary_reviewer_private).trim().length > 0;
+    const hasEmployee = safeString(existingReview?.summary_employee_visible).trim().length > 0;
+    const hasScores = !!(existingScoreRow?.category_scores && Object.keys(existingScoreRow.category_scores).length > 0);
+    return `reviewId=${rid} status=${reviewStatus} private=${hasPrivate} employee=${hasEmployee} scores=${hasScores}`;
+  }, [existingReview, existingScoreRow, reviewStatus]);
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <h1 style={{ fontSize: 22, fontWeight: 700 }}>Review</h1>
-
-      <label style={{ display: "grid", gap: 8 }}>
-        <div style={{ fontWeight: 700 }}>Reviewer Narrative (Private)</div>
-        <textarea
-          value={privateSummary}
-          onChange={(e) => setPrivateSummary(e.target.value)}
-          rows={10}
-          style={{ width: "100%", padding: 12, borderRadius: 12, border: "1px solid #ddd" }}
-        />
-      </label>
-
-      <label style={{ display: "grid", gap: 8 }}>
-        <div style={{ fontWeight: 700 }}>Employee Summary (Visible)</div>
-        <textarea
-          value={employeeSummary}
-          onChange={(e) => setEmployeeSummary(e.target.value)}
-          rows={6}
-          style={{ width: "100%", padding: 12, borderRadius: 12, border: "1px solid #ddd" }}
-        />
-      </label>
-
-      <div style={{ display: "flex", gap: 8 }}>
-        <button disabled={saving} onClick={() => saveNarrative(false)} style={btn}>
-          Save Draft
+      {/* Header / nav */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          border: "1px solid #eee",
+          borderRadius: 12,
+          padding: 12,
+          background: "white",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => {
+            if (!isPending || !nav.prevId) return;
+            guardedPush(`/reviews/${nav.prevId}`);
+          }}
+          disabled={!isPending || !nav.prevId}
+          style={{ ...btn, opacity: isPending && nav.prevId ? 1 : 0.4 }}
+          aria-label="Previous pending review"
+          title="Previous pending review"
+        >
+          ←
         </button>
-        <button disabled={saving} onClick={() => saveNarrative(true)} style={btnPrimary}>
-          Submit Narrative
-        </button>
-      </div>
 
-      {canScore && (
-        <div style={{ borderTop: "1px solid #eee", paddingTop: 16, display: "grid", gap: 12 }}>
-          <div style={{ fontSize: 18, fontWeight: 700 }}>Scores (Primary only)</div>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontWeight: 800, fontSize: 14 }}>{employeeName}</div>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>
+            {reviewerLabel}
+            {isPending && nav.total > 0 && nav.position ? ` • ${nav.position} of ${nav.total}` : ""}
+            {isLocked ? " • Committed" : " • Draft"}
+            {isDirty ? " • Unsaved changes" : ""}
+          </div>
+          <div style={{ fontSize: 11, opacity: 0.55, marginTop: 4, fontFamily: "monospace" }}>
+            {debugLine}
+          </div>
+        </div>
 
-          {scoreRows.length === 0 ? (
-            <div style={{ opacity: 0.8 }}>
-              No rubric categories available for scoring.
-            </div>
-          ) : (
-            scoreRows.map((r, idx) => (
-              <div key={r.key} style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                <div style={{ width: 360 }}>
-                  <div style={{ fontWeight: 700 }}>{r.label}</div>
-                  <div style={{ fontFamily: "monospace", fontSize: 12, opacity: 0.7 }}>
-                    {r.key}{r.weight != null ? ` (weight ${r.weight})` : ""}
-                  </div>
-                </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button type="button" onClick={() => guardedPush("/reviews")} style={btn}>
+            Exit
+          </button>
 
-                <input
-                  type="number"
-                  value={r.score}
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    setScoreRows((prev) =>
-                      prev.map((x, i) => (i === idx ? { ...x, score: v } : x))
-                    );
-                  }}
-                  style={{ width: 120, padding: 10, borderRadius: 12, border: "1px solid #ddd" }}
-                />
-              </div>
-            ))
-          )}
-
-          <button disabled={saving || scoreRows.length === 0} onClick={saveScores} style={btnPrimary}>
-            Save Scores
+          <button
+            type="button"
+            onClick={() => {
+              if (!isPending || !nav.nextId) return;
+              guardedPush(`/reviews/${nav.nextId}`);
+            }}
+            disabled={!isPending || !nav.nextId}
+            style={{ ...btn, opacity: isPending && nav.nextId ? 1 : 0.4 }}
+            aria-label="Next pending review"
+            title="Next pending review"
+          >
+            →
           </button>
         </div>
+      </div>
+
+      <h1 style={{ fontSize: 22, fontWeight: 700 }}>Review</h1>
+
+      {/* Narrative side-by-side */}
+      <div style={card}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+          <div>
+            <div style={{ fontWeight: 800 }}>Narrative</div>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>Save anytime. Commit locks both narrative and scores.</div>
+          </div>
+
+         <button
+            disabled={saving || isLocked || !isNarrativeDirty}
+            onClick={saveNarrativeOnly}
+            style={
+              saving || isLocked || !isNarrativeDirty
+                ? btnPrimaryDisabled
+                : { ...btnPrimary, boxShadow: "0 0 0 3px rgba(0,0,0,0.08)" }
+            }
+            title={
+              isLocked
+                ? "This review is committed and locked"
+                : !isNarrativeDirty
+                ? "No narrative changes to save"
+                : "Saves both narrative fields"
+            }
+          >
+            Save Narrative (Both)
+         </button>
+        </div>
+
+        <div
+          style={{
+            marginTop: 12,
+            display: "grid",
+            gridTemplateColumns: "1fr 1px 1fr",
+            gap: 12,
+            alignItems: "stretch",
+          }}
+        >
+          <div style={{ display: "grid", gap: 8 }}>
+            <div style={{ fontWeight: 700 }}>Reviewer Narrative (Private)</div>
+            <textarea
+              value={privateSummary}
+              onChange={(e) => setPrivateSummary(e.target.value)}
+              rows={14}
+              disabled={saving || isLocked}
+              style={textareaStyle(isLocked)}
+            />
+            <div style={{ fontSize: 12, opacity: 0.6 }}>Only visible to reviewers/admins.</div>
+          </div>
+
+          <div aria-hidden style={{ width: 1, background: "#e5e7eb", borderRadius: 1 }} />
+
+          <div style={{ display: "grid", gap: 8 }}>
+            <div style={{ fontWeight: 700 }}>Employee Summary (Visible)</div>
+            <textarea
+              value={employeeSummary}
+              onChange={(e) => setEmployeeSummary(e.target.value)}
+              rows={14}
+              disabled={saving || isLocked}
+              style={textareaStyle(isLocked)}
+            />
+            <div style={{ fontSize: 12, opacity: 0.6 }}>Visible to the employee when shared.</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Scores */}
+      {canScore && (
+        <div style={card}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+            <div>
+              <div style={{ fontWeight: 800 }}>Scores</div>
+              <div style={{ fontSize: 12, opacity: 0.7 }}>
+                Required for Commit. Range {SCORE_MIN}–{SCORE_MAX}.
+              </div>
+            </div>
+
+             <button
+              disabled={saving || isLocked || scoreRows.length === 0 || !isScoresDirty}
+              onClick={saveScoresOnly}
+              style={
+                saving || isLocked || scoreRows.length === 0 || !isScoresDirty
+                  ? btnPrimaryDisabled
+                  : btnPrimary
+              }
+              title={
+                isLocked
+                  ? "This review is committed and locked"
+                  : scoreRows.length === 0
+                  ? "No rubric categories available"
+                  : !isScoresDirty
+                  ? "No score changes to save"
+                  : "Save scores"
+              }
+            >
+              Save Scores
+            </button>
+          </div>
+
+          <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+            {scoreRows.length === 0 ? (
+              <div style={{ opacity: 0.8 }}>No rubric categories available for scoring.</div>
+            ) : (
+              scoreRows.map((r, idx) => (
+                <div key={r.key} style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                  <div style={{ width: 360 }}>
+                    <div style={{ fontWeight: 700 }}>{r.label}</div>
+                    <div style={{ fontFamily: "monospace", fontSize: 12, opacity: 0.7 }}>
+                      {r.key}
+                      {r.weight != null ? ` (weight ${r.weight})` : ""}
+                    </div>
+                  </div>
+
+                  <input
+                    type="number"
+                    min={SCORE_MIN}
+                    max={SCORE_MAX}
+                    step={1}
+                    value={r.score}
+                    disabled={saving || isLocked}
+                    onChange={(e) => {
+                      const raw = Number(e.target.value);
+                      const v = Number.isFinite(raw)
+                        ? Math.min(SCORE_MAX, Math.max(SCORE_MIN, raw))
+                        : SCORE_MIN;
+
+                      setScoreRows((prev) => prev.map((x, i) => (i === idx ? { ...x, score: v } : x)));
+                    }}
+                    style={{
+                      width: 140,
+                      padding: 10,
+                      borderRadius: 12,
+                      border: "1px solid #ddd",
+                      opacity: isLocked ? 0.75 : 1,
+                    }}
+                  />
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       )}
+
+      {errorMsg && (
+        <div
+          style={{
+            marginTop: 6,
+            padding: 12,
+            borderRadius: 10,
+            border: "1px solid #fca5a5",
+            background: "#fef2f2",
+            color: "#991b1b",
+            fontSize: 13,
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {errorMsg}
+        </div>
+      )}
+
+      {/* Commit */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          marginTop: 8,
+          paddingTop: 8,
+          borderTop: "1px solid #eee",
+        }}
+      >
+        <div style={{ fontSize: 12, opacity: 0.7 }}>
+          {isLocked
+            ? "This review is committed and locked."
+            : validation.ok
+            ? "Ready to commit when you are."
+            : "Complete required fields to enable Commit."}
+        </div>
+
+        <button
+          type="button"
+          disabled={saving || isLocked || !validation.ok}
+          onClick={commitReview}
+          style={saving || isLocked || !validation.ok ? btnPrimaryDisabled : btnPrimary}
+          title={!validation.ok ? "Fill required fields to commit" : "Commit review"}
+        >
+          Commit Review →
+        </button>
+      </div>
     </div>
   );
 }
 
 const btn: React.CSSProperties = {
-  padding: "10px 14px",
+  padding: "10px 16px",
   borderRadius: 12,
   border: "1px solid #ddd",
   background: "white",
   cursor: "pointer",
+  fontWeight: 600,
 };
 
 const btnPrimary: React.CSSProperties = {
   ...btn,
-  border: "1px solid #111",
-  background: "#111",
-  color: "white",
+  background: "#000",
+  border: "1px solid #000",
+  color: "#fff",
 };
+
+const btnPrimaryDisabled: React.CSSProperties = {
+  ...btnPrimary,
+  opacity: 0.45,
+  cursor: "not-allowed",
+};
+
+const card: React.CSSProperties = {
+  border: "1px solid #eee",
+  borderRadius: 12,
+  padding: 14,
+  background: "white",
+};
+
+function textareaStyle(isLocked: boolean): React.CSSProperties {
+  return {
+    width: "100%",
+    padding: 12,
+    borderRadius: 12,
+    border: "1px solid #ddd",
+    opacity: isLocked ? 0.75 : 1,
+  };
+}

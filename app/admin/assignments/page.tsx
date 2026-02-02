@@ -371,7 +371,7 @@ export default function AssignmentsAdminPage() {
         </div>
 
         <Link
-          href="/admin/reviews"
+          href="/reviews"
           style={{
             padding: "10px 14px",
             borderRadius: 10,

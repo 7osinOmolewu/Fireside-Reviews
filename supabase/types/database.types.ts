@@ -772,6 +772,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      admin_reopen_review: { Args: { p_review_id: string }; Returns: undefined }
       assert_minimum_reviews_submitted: {
         Args: { p_cycle_id: string; p_employee_id: string }
         Returns: undefined
@@ -799,7 +800,9 @@ export type Database = {
         Returns: undefined
       }
       init_cycle_rubrics: { Args: { p_cycle_id: string }; Returns: undefined }
-      is_admin: { Args: never; Returns: boolean }
+      is_admin:
+        | { Args: never; Returns: boolean }
+        | { Args: { p_user_id: string }; Returns: boolean }
       make_employee_code: { Args: { p_role: string }; Returns: string }
       next_employee_number: { Args: { p_role: string }; Returns: number }
       score_to_rating: {

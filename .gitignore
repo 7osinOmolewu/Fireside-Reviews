@@ -59,3 +59,5 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 EOF
+schema.sqldir
+schema_clean.sql

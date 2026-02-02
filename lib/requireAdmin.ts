@@ -1,11 +1,18 @@
 // lib/requireAdmin.ts
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/supabase/types/database.types";
 
-export async function requireAdmin() {
-  const cookieStore = await cookies(); // ✅ MUST await in your setup
+type AuthedAdmin = {
+  supabase: SupabaseClient<Database>;
+  userId: string;
+};
 
-  const supabase = createServerClient(
+export async function requireAdmin(): Promise<AuthedAdmin> {
+  const cookieStore = await cookies();
+
+  const supabase = createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
@@ -35,5 +42,5 @@ export async function requireAdmin() {
   if (profErr) throw new Error(profErr.message);
   if (profile.user_role !== "admin") throw new Error("Forbidden");
 
-  return { userId: userData.user.id };
+  return { supabase, userId: userData.user.id };
 }
