@@ -3,9 +3,12 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer";
 
 export async function POST(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
+
   const supabase = await createSupabaseServerClient();
+
 
   const {
     data: { user },
@@ -16,7 +19,7 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const reviewId = params.id;
+  const reviewId = id;
 
   // Fetch current review state
   const { data: review, error: reviewError } = await supabase

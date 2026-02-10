@@ -2,7 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabaseServer";
 import type { Database } from "@/supabase/types/database.types";
-import { getActiveCycleIdServer } from "@/lib/activeCycleServer"; // ✅ server helper
+import { resolveCycleServer } from "@/lib/activeCycleServer";
+import { getCycleLabel } from "@/lib/cycleLabel";
 
 type ReviewAssignmentRow = Database["public"]["Tables"]["review_assignments"]["Row"];
 type EmployeeRow = Database["public"]["Tables"]["employees"]["Row"];
@@ -63,6 +64,7 @@ export default async function ReviewsPage({
   searchParams: Promise<{ cycleId?: string }>;
 }) {
   const { cycleId } = await searchParams;
+  const cycleIdFromQS = cycleId ?? null;
 
   const supabase = await createSupabaseServerClient();
 
@@ -71,6 +73,11 @@ export default async function ReviewsPage({
   } = await supabase.auth.getUser();
 
   if (!user) redirect("/login");
+
+  const cycle = await resolveCycleServer({
+    userId: user.id,
+    cycleIdFromQS,
+  });
 
   const { data: profile } = await supabase
     .from("profiles")
@@ -83,64 +90,48 @@ export default async function ReviewsPage({
   const { data: adminRow } = await supabase.from("admin_users").select("id").eq("id", user.id).maybeSingle();
   const isAdmin = !!adminRow;
 
-  // 1) Open cycles (calibrating)
-  const { data: openCycles, error: cyclesError } = await supabase
-    .from("review_cycles")
-    .select("id, name, status")
-    .in("status", ["calibrating"]);
+  // 1) Fetch cycle names for:
+  // - open cycles (for "All open cycles" label)
+  // - selected cycle (so label never falls back to "Selected cycle")
+  const cycleIdsForLabel = Array.from(
+    new Set([...(cycle.openCycleIds ?? []), ...(cycle.selectedCycleId ? [cycle.selectedCycleId] : [])])
+  );
+
+  const { data: cyclesForLabel, error: cyclesError } = cycleIdsForLabel.length
+    ? await supabase.from("review_cycles").select("id, name, status").in("id", cycleIdsForLabel)
+    : { data: [], error: null };
 
   if (cyclesError) return <pre style={{ padding: 16 }}>{JSON.stringify(cyclesError, null, 2)}</pre>;
 
-  const openCycleIds = (openCycles ?? []).map((c) => c.id);
-  const cycleById = new Map<string, string>((openCycles ?? []).map((c) => [c.id, c.name]));
+  const openCycleIds = (cyclesForLabel ?? [])
+    .filter((c) => c.status === "calibrating")
+    .map((c) => c.id);
 
-// 0) read global active cycle id (server)
-const globalActiveCycleId = await getActiveCycleIdServer(); // NOTE: server version, not client
+  const cycleById = new Map<string, string>((cyclesForLabel ?? []).map((c) => [c.id, c.name]));
 
-// 1) optional per-page override (QS), admin only, only if valid + open
-const overrideCycleId =
-  isAdmin && cycleId && openCycleIds.includes(cycleId) ? cycleId : null;
+  const cycleIdsToUse = cycle.cycleIdsToUse;
 
-// 2) global default, only if valid + open
-const globalCycleId =
-  globalActiveCycleId && openCycleIds.includes(globalActiveCycleId) ? globalActiveCycleId : null;
+  if (cycleIdsToUse.length === 0) {
+    return (
+      <div style={{ padding: 24 }}>
+        <h1 style={{ margin: 0 }}>My Review Inbox</h1>
+        <p style={{ marginTop: 10, color: "#6b7280" }}>
+          No active cycle is available (no open cycles found).
+        </p>
+      </div>
+    );
+  }
 
-// 3) final decision (override wins). If neither, fall back to first open cycle (or null)
-const selectedCycleId = overrideCycleId ?? globalCycleId ?? (openCycleIds[0] ?? null);
+  const cycleQS = cycle.cycleQS;
 
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const cycleLabel = getCycleLabel({
+    selectedCycleId: cycle.selectedCycleId,
+    openCycleIds: cycle.openCycleIds,
+    cycleById,
+  });
 
-const rawCycleIdsToUse = selectedCycleId ? [selectedCycleId] : openCycleIds;
-
-// ✅ sanitize: drop null/undefined/"undefined"/non-uuid
-const cycleIdsToUse = rawCycleIdsToUse.filter(
-  (x): x is string => typeof x === "string" && x !== "undefined" && UUID_RE.test(x)
-);
-
-if (cycleIdsToUse.length === 0) {
-  return (
-    <div style={{ padding: 24 }}>
-      <h1 style={{ margin: 0 }}>My Review Inbox</h1>
-      <p style={{ marginTop: 10, color: "#6b7280" }}>
-        No active cycle is available (no open “calibrating” cycles found).
-      </p>
-    </div>
-  );
-}
-
-// And this for links
-const cycleQS = selectedCycleId ? `?cycleId=${encodeURIComponent(selectedCycleId)}` : "";
-
-// Label from the FINAL selection
-const cycleLabel =
-  selectedCycleId
-    ? cycleById.get(selectedCycleId) ?? "Selected cycle"
-    : openCycleIds.length > 1
-    ? "All open cycles"
-    : openCycleIds.length === 1
-    ? cycleById.get(openCycleIds[0]) ?? "Open cycle"
-    : "No open cycles";
+  const overrideCycleId =
+    isAdmin && cycleIdFromQS && cycle.selectedCycleId === cycleIdFromQS ? cycleIdFromQS : null;
 
 
   // 2) Fetch assignments

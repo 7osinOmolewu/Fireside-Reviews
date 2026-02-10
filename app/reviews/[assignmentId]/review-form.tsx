@@ -23,11 +23,15 @@ export default function ReviewForm({
   rubricCategories,
   pendingAssignmentIds,
   isPending,
+  cycleLabel,
+  cycleQS,
 }: {
   assignment: AssignmentPayload;
   rubricCategories: RubricCategoryRow[];
   pendingAssignmentIds: string[];
   isPending: boolean;
+  cycleLabel: string;
+  cycleQS: string;
 }) {
   const router = useRouter();
 
@@ -377,7 +381,7 @@ export default function ReviewForm({
           type="button"
           onClick={() => {
             if (!isPending || !nav.prevId) return;
-            guardedPush(`/reviews/${nav.prevId}`);
+            guardedPush(`/reviews/${nav.prevId}${cycleQS}`);
           }}
           disabled={!isPending || !nav.prevId}
           style={{ ...btn, opacity: isPending && nav.prevId ? 1 : 0.4 }}
@@ -406,7 +410,10 @@ export default function ReviewForm({
               lineHeight: 1.1,
             }}
           >
-            Reviewing {employeeName}
+            Reviewing {employeeName}{" "}
+            <span style={{ fontSize: 24, fontWeight: 900, color: "#6b7280" }}>
+              ({cycleLabel})
+            </span>
           </div>
 
           {isPending && nav.position && nav.total ? (
@@ -423,8 +430,9 @@ export default function ReviewForm({
           ) : null}
         </div>
 
+
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button type="button" onClick={() => guardedPush("/reviews")} style={btn}>
+          <button type="button" onClick={() => guardedPush(`/reviews${cycleQS}`)} style={btn}>
             Exit
           </button>
 
@@ -432,7 +440,7 @@ export default function ReviewForm({
             type="button"
             onClick={() => {
               if (!isPending || !nav.nextId) return;
-              guardedPush(`/reviews/${nav.nextId}`);
+              guardedPush(`/reviews/${nav.nextId}${cycleQS}`);
             }}
             disabled={!isPending || !nav.nextId}
             style={{ ...btn, opacity: isPending && nav.nextId ? 1 : 0.4 }}

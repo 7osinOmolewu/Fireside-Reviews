@@ -1,16 +1,19 @@
 import { redirect } from "next/navigation";
 import ReviewForm from "./review-form";
 import { createSupabaseServerClient } from "@/lib/supabaseServer";
+import { getCycleLabel } from "@/lib/cycleLabel";
+import { resolveCycleServer } from "@/lib/activeCycleServer";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function ReviewAssignmentPage(props: {
   params: Promise<{ assignmentId: string }>;
-  searchParams?: { cycleId?: string };
+  searchParams?: Promise<{ cycleId?: string }>;
 }) {
   const { assignmentId } = await props.params;
-  const sp = (props.searchParams ? await props.searchParams : {}) as { cycleId?: string };
+
+  const sp = props.searchParams ? await props.searchParams : {};
   const cycleIdFromQS = sp.cycleId ?? null;
 
   const supabase = await createSupabaseServerClient();
@@ -153,24 +156,13 @@ export default async function ReviewAssignmentPage(props: {
   const rubricCategories = ((chosen as any)?.rubrics?.rubric_categories as any[]) ?? [];
 
   // ===== Pending nav list (match /reviews page order + filters) =====
+  const cycle = await resolveCycleServer({
+    userId: auth.user.id,
+    cycleIdFromQS,
+  });
 
-  // A) Open cycles (same as inbox: calibrating)
-  const { data: openCycles, error: cyclesErr } = await supabase
-    .from("review_cycles")
-    .select("id")
-    .in("status", ["calibrating"]);
+  const cycleIdsToUse = cycle.cycleIdsToUse;
 
-  if (cyclesErr) return <pre style={{ padding: 16 }}>{JSON.stringify(cyclesErr, null, 2)}</pre>;
-
-  const openCycleIds = (openCycles ?? []).map((c) => c.id);
-
-  // B) Use ONLY selected cycle if present and valid, otherwise fallback to open cycles
-  const selectedCycleId =
-    cycleIdFromQS && openCycleIds.includes(cycleIdFromQS) ? cycleIdFromQS : null;
-
-  const cycleIdsToUse = selectedCycleId ? [selectedCycleId] :  [assignmentCycleId];
-
-  // C) Assignments shown on inbox: reviewer_id + is_active + cycleIdsToUse, newest-first
   const { data: navAssignments, error: navAssignErr } = await supabase
     .from("review_assignments")
     .select("id, created_at")
@@ -183,6 +175,27 @@ export default async function ReviewAssignmentPage(props: {
 
   const pendingAssignmentIds: string[] = (navAssignments ?? []).map((a) => a.id);
   const isPending = pendingAssignmentIds.includes(assignmentId);
+ 
+  // Fetch cycle names needed for label (open cycles + selected cycle)
+  const cycleIdsForLabel = Array.from(
+    new Set([...(cycle.openCycleIds ?? []), ...(cycle.selectedCycleId ? [cycle.selectedCycleId] : [])])
+  );
+
+  const { data: cyclesForLabel, error: cyclesLabelErr } = cycleIdsForLabel.length
+    ? await supabase.from("review_cycles").select("id, name, status").in("id", cycleIdsForLabel)
+    : { data: [], error: null };
+
+  if (cyclesLabelErr) return <pre style={{ padding: 16 }}>{JSON.stringify(cyclesLabelErr, null, 2)}</pre>;
+
+  const cycleById = new Map<string, string>((cyclesForLabel ?? []).map((c) => [c.id, c.name]));
+
+  const cycleLabel = getCycleLabel({
+    selectedCycleId: cycle.selectedCycleId,
+    openCycleIds: cycle.openCycleIds,
+    cycleById,
+  });
+
+  const cycleQS = cycle.cycleQS;
 
   return (
     <div style={{ padding: 24, maxWidth: 900 }}>
@@ -192,6 +205,8 @@ export default async function ReviewAssignmentPage(props: {
         rubricCategories={rubricCategories as any[]}
         pendingAssignmentIds={pendingAssignmentIds}
         isPending={isPending}
+        cycleLabel={cycleLabel}
+        cycleQS={cycleQS}
       />
     </div>
   );

@@ -34,7 +34,7 @@ const NEW_CYCLE_VALUE = "__NEW_CYCLE__";
 
 export default function CyclesManagementPage() {
   const [isLoading, setIsLoading] = useState(true);
-  
+
   const [prevCycleId, setPrevCycleId] = useState<string | null>(null);
   // mapping from previous cycle: job_role_id -> rubric_id
   const [prevMapping, setPrevMapping] = useState<Record<string, string>>({});
@@ -46,6 +46,9 @@ export default function CyclesManagementPage() {
   const [rubrics, setRubrics] = useState<Rubric[]>([]);
 
   const [selectedCycleId, setSelectedCycleId] = useState<string>("");
+
+  const [globalActiveCycleId, setGlobalActiveCycleId] = useState<string | null>(null);
+  const [settingGlobal, setSettingGlobal] = useState(false);
 
   // Create cycle form fields
   const [name, setName] = useState("");
@@ -61,14 +64,17 @@ export default function CyclesManagementPage() {
     [cycles, selectedCycleId]
   );
 
+  const isSelectedCycleGlobalActive =
+  !!globalActiveCycleId && !!selectedCycle?.id && selectedCycle.id === globalActiveCycleId;
+
   const isCreatingCycle = selectedCycleId === NEW_CYCLE_VALUE;
 
   function getPrevCycleId(allCycles: Cycle[], selectedId: string) {
-  // cycles are already loaded/sorted by start_date DESC in loadCycles()
-  const idx = allCycles.findIndex((c) => c.id === selectedId);
-  if (idx === -1) return null;
-  const prev = allCycles[idx + 1]; // next item is older cycle
-  return prev?.id ?? null;
+    // cycles are already loaded/sorted by start_date DESC in loadCycles()
+    const idx = allCycles.findIndex((c) => c.id === selectedId);
+    if (idx === -1) return null;
+    const prev = allCycles[idx + 1]; // next item is older cycle
+    return prev?.id ?? null;
   }
 
   async function requireAdminClientSide() {
@@ -84,7 +90,16 @@ export default function CyclesManagementPage() {
     return me;
   }
 
-  async function loadCycles() {
+  async function loadGlobalActiveCycle() {
+    const res = await fetch("/api/admin/active-cycle", { method: "GET" });
+
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json?.error ?? "Failed to load active cycle");
+
+    return json as { activeCycleId: string | null; updatedAt: string | null };
+  }
+
+  async function loadCycles(): Promise<Cycle[]> {
     const { data, error } = await supabase
       .from("review_cycles")
       .select("id,name,start_date,end_date,status")
@@ -94,9 +109,7 @@ export default function CyclesManagementPage() {
 
     const list = (data ?? []) as Cycle[];
     setCycles(list);
-
-    // Default selection to latest cycle if nothing selected yet
-    if (!selectedCycleId && list.length > 0) setSelectedCycleId(list[0].id);
+    return list;
   }
 
   async function loadJobRoles() {
@@ -130,20 +143,41 @@ export default function CyclesManagementPage() {
     setMapping(m);
   }
 
+  const globalActiveCycleName = useMemo(() => {
+    if (!globalActiveCycleId) return null;
+    return cycles.find((c) => c.id === globalActiveCycleId)?.name ?? "Unknown";
+  }, [globalActiveCycleId, cycles]);
+
   useEffect(() => {
     (async () => {
-      setError(null);
-      setIsLoading(true);
+      try {
+        setError(null);
+        setIsLoading(true);
 
-      const me = await requireAdminClientSide();
-      if (!me) return;
+        const me = await requireAdminClientSide();
+        if (!me) return;
 
-      await Promise.all([loadCycles(), loadJobRoles(), loadRubrics()]);
-      setIsLoading(false);
-    })().catch((e: any) => {
-      setError(e?.message ?? "Unknown error");
-      setIsLoading(false);
-    });
+        const [{ activeCycleId }, cyclesList] = await Promise.all([
+          loadGlobalActiveCycle(),
+          loadCycles(),
+          loadJobRoles(),
+          loadRubrics(),
+        ]);
+
+        setGlobalActiveCycleId(activeCycleId ?? null);
+
+        // Prefer selecting the global active cycle on first load
+        if (activeCycleId && cyclesList.some((c) => c.id === activeCycleId)) {
+          setSelectedCycleId(activeCycleId);
+        } else if (cyclesList.length > 0) {
+          setSelectedCycleId(cyclesList[0].id);
+        }
+      } catch (e: any) {
+        setError(e?.message ?? "Unknown error");
+      } finally {
+        setIsLoading(false);
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -280,7 +314,9 @@ export default function CyclesManagementPage() {
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
         <div>
-          <h1 style={{ margin: 0 , marginTop: 24 }}><BackToAdmin />· Manage Cycles</h1>
+          <h1 style={{ margin: 0, marginTop: 24 }}>
+            <BackToAdmin />· Manage Cycles
+          </h1>
         </div>
 
         <Link
@@ -305,7 +341,9 @@ export default function CyclesManagementPage() {
       <section style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         {/* Left: selector */}
         <div style={{ padding: 16, border: "1px solid #ddd", borderRadius: 10 }}>
-          <h2 style={{ marginTop: 0, marginBottom: 10 }}><strong>Selected cycle</strong></h2>
+          <h2 style={{ marginTop: 0, marginBottom: 10 }}>
+            <strong>Selected cycle</strong>
+          </h2>
 
           <select
             value={selectedCycleId}
@@ -322,6 +360,66 @@ export default function CyclesManagementPage() {
             <option value={NEW_CYCLE_VALUE}>Create new cycle…</option>
           </select>
 
+          {/* Global active + Set current (moved here from Cycle details) */}
+          {!isCreatingCycle && selectedCycle ? (
+            <div style={{ marginTop: 12, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ fontSize: 12, opacity: 0.7 }}>
+                <strong> Current Performance Cycle:</strong> 
+                <span
+                  style={{ marginLeft: 6, fontWeight: 700 }}
+                  title={globalActiveCycleId ?? undefined}
+                >
+                  {globalActiveCycleName ?? "none"}
+                </span>
+              </div>
+
+              {isSelectedCycleGlobalActive ? (
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#065f46" }}> </span>
+              ) : (
+                <button
+                  type="button"
+                  disabled={settingGlobal || !selectedCycle?.id}
+                  onClick={async () => {
+                    if (!selectedCycle?.id) return;
+                    setSettingGlobal(true);
+                    setError(null);
+
+                    try {
+                      const res = await fetch("/api/admin/active-cycle", {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ cycleId: selectedCycle.id }),
+                      });
+
+                      const json = await res.json().catch(() => ({}));
+                      if (!res.ok) {
+                        setError(json?.error ?? "Failed to set active cycle");
+                        return;
+                      }
+
+                      setGlobalActiveCycleId(selectedCycle.id);
+                    } finally {
+                      setSettingGlobal(false);
+                    }
+                  }}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    border: "1px solid #111827",
+                    background: "#111827",
+                    color: "white",
+                    fontWeight: 700,
+                    cursor: settingGlobal ? "not-allowed" : "pointer",
+                    opacity: settingGlobal ? 0.7 : 1,
+                  }}
+                >
+                  {settingGlobal ? "Setting…" : "Set to Current Cycle"}
+                </button>
+              )}
+            </div>
+          ) : null}
+
+         
           {isCreatingCycle && (
             <p style={{ marginTop: 10, opacity: 0.8 }}>
               Create a new cycle. It will start as <span style={{ fontFamily: "monospace" }}>draft</span>.
@@ -333,7 +431,10 @@ export default function CyclesManagementPage() {
         <div style={{ padding: 16, border: "1px solid #ddd", borderRadius: 10 }}>
           {!isCreatingCycle && selectedCycle && (
             <>
-              <h2 style={{ marginTop: 0, marginBottom: 10 }}><strong>Cycle details</strong></h2>
+              <h2 style={{ marginTop: 0, marginBottom: 10 }}>
+                <strong>Cycle details</strong>
+              </h2>
+
               <div style={{ display: "grid", gap: 8 }}>
                 <div>
                   <div style={{ fontSize: 12, opacity: 0.7 }}>Name</div>
@@ -354,9 +455,7 @@ export default function CyclesManagementPage() {
 
                 <div>
                   <div style={{ fontSize: 12, opacity: 0.7 }}>Templates mapped</div>
-                  <div>
-                    {jobRoles.length === 0 ? "0" : `${Object.keys(mapping).length}/${jobRoles.length}`}
-                  </div>
+                  <div>{jobRoles.length === 0 ? "0" : `${Object.keys(mapping).length}/${jobRoles.length}`}</div>
                 </div>
               </div>
             </>
@@ -410,15 +509,14 @@ export default function CyclesManagementPage() {
 
       {/* Cycle Form Templates */}
       <section style={{ marginTop: 18 }}>
-        
         {selectedCycleId && (
-        <div style={{ marginBottom: 12 }}>
-          <strong>
-            Templates for Cycle:&nbsp;
-            {cycles.find((c) => c.id === selectedCycleId)?.name}
-          </strong>
-        </div>
-      )}
+          <div style={{ marginBottom: 12 }}>
+            <strong>
+              Templates for Cycle:&nbsp;{cycles.find((c) => c.id === selectedCycleId)?.name}
+            </strong>
+          </div>
+        )}
+
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>
@@ -433,8 +531,6 @@ export default function CyclesManagementPage() {
               const options = rubricsForRole(jr.id);
               const value = mapping[jr.id] ?? "";
               const saving = savingRoleId === jr.id;
-
-              const statusText = saving ? "Saving…" : getTemplateStatus(jr.id);
 
               const cur = mapping[jr.id] ?? "";
               const prev = prevMapping[jr.id] ?? "";
@@ -478,6 +574,7 @@ export default function CyclesManagementPage() {
                       </div>
                     )}
                   </td>
+
                   <td style={{ borderBottom: "1px solid #eee", padding: 8, width: 140 }}>
                     {saving ? "Saving..." : computedStatus}
                   </td>
@@ -487,14 +584,16 @@ export default function CyclesManagementPage() {
           </tbody>
         </table>
 
-       <p style={{
-          marginTop: 0,
-          opacity: 0.85,
-          fontWeight: 600,
-          fontStyle: "italic",
-        }} >
-          Assign which rubric/template each Job Family uses for the selected cycle. New cycles default to the previous cycle’s
-          assignments.
+        <p
+          style={{
+            marginTop: 0,
+            opacity: 0.85,
+            fontWeight: 600,
+            fontStyle: "italic",
+          }}
+        >
+          Assign which rubric/template each Job Family uses for the selected cycle. New cycles default to the previous
+          cycle’s assignments.
         </p>
 
         <div style={{ marginTop: 24, textDecoration: "underline" }}>
