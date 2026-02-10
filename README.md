@@ -397,13 +397,26 @@ app/
 │ └── review-form.tsx
 ├── api/
 │ ├── admin/
+| ├── auth /
 │ └── reviews/
-lib/
-├── supabaseServer.ts
-├── supabaseClient.ts
-├── requireAdmin.ts
-├── me.ts
-└── meServer.ts
+├── auth / callback /
+├── employee/ 
+├── login/
+├──components/
+│  ├── AdminReopenReviewButton
+│  ├── PageTransition
+│  ├── useCycleSelection
+├──lib/
+│  ├── supabaseServer.ts
+│  ├── supabaseClient.ts
+│  ├── requireAdmin.ts
+│  ├── me.ts
+│  ├── meServer.ts
+│  ├── activeCycleClient.ts
+│  ├── activeCycleServer.ts
+│  ├── cycleLabel.ts
+│  └── getJobRoles.ts
+
 supabase/
 ├── migrations/
 ├── schema.sql
@@ -412,6 +425,54 @@ supabase/
 yaml
 
 ---
+
+## Active Cycle (Global)
+
+### What it is
+The app uses a single **global active cycle** that all pages default to when no explicit cycle is provided.
+
+### Where it’s stored
+Stored in the `public.app_settings` table as a single row:
+
+- `key` = `active_cycle_id`  
+- `value` = `<uuid of review_cycles.id>`
+
+### Resolution order
+The active cycle is resolved in the following order:
+
+1. **Admin override via query param**  
+   `?cycleId=` (only honored if the cycle is open)
+
+2. **Global active cycle**  
+   Value from `app_settings.active_cycle_id`
+
+3. **Fallback**  
+   First open cycle with status `calibrating`
+
+### How to change it (Admin)
+Choose one of the following approaches (recommended option noted):
+
+- **Admin UI screen**  
+  Provide an internal admin-only screen that allows selecting and saving the active cycle.
+
+- **Admin-only API route (recommended)**  
+  Create a protected API route that updates `public.app_settings` where  
+  `key = 'active_cycle_id'`.
+
+### Developer notes
+- Pages **must not** resolve cycles independently.
+- All cycle resolution must go through a **shared resolver helper**.
+- Keep the logic in one place to prevent drift and inconsistent behavior.
+
+### Troubleshooting
+- **Next.js runtime error (params/searchParams Promise)**  
+  If you see an error related to accessing `params` or `searchParams`, ensure you `await`  
+  `props.params` and `props.searchParams` before reading their properties.
+
+- **Supabase typing issues with `.from("app_settings")`**  
+  If typing fails:
+  - Regenerate Supabase types, **or**
+  - Use a temporary typed escape hatch until types are regenerated.
 
 ## 🧪 Local Development Notes
 

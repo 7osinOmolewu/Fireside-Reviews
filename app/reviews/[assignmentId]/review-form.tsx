@@ -358,14 +358,6 @@ export default function ReviewForm({
     }
   }
 
-  const debugLine = useMemo(() => {
-    const rid = existingReview?.id ?? "none";
-    const hasPrivate = safeString(existingReview?.summary_reviewer_private).trim().length > 0;
-    const hasEmployee = safeString(existingReview?.summary_employee_visible).trim().length > 0;
-    const hasScores = !!(existingScoreRow?.category_scores && Object.keys(existingScoreRow.category_scores).length > 0);
-    return `reviewId=${rid} status=${reviewStatus} private=${hasPrivate} employee=${hasEmployee} scores=${hasScores}`;
-  }, [existingReview, existingScoreRow, reviewStatus]);
-
   return (
     <div style={{ display: "grid", gap: 16 }}>
       {/* Header / nav */}
@@ -394,18 +386,41 @@ export default function ReviewForm({
         >
           ←
         </button>
+        
+        {/* Center label */}
+        <div
+          style={{
+            flex: 1,
+            textAlign: "center",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+          title={`Reviewing ${employeeName}`}
+        >
+          <div
+            style={{
+              fontSize: 28,
+              fontWeight: 800,
+              color: "#111827",
+              lineHeight: 1.1,
+            }}
+          >
+            Reviewing {employeeName}
+          </div>
 
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontWeight: 800, fontSize: 14 }}>{employeeName}</div>
-          <div style={{ fontSize: 12, opacity: 0.7 }}>
-            {reviewerLabel}
-            {isPending && nav.total > 0 && nav.position ? ` • ${nav.position} of ${nav.total}` : ""}
-            {isLocked ? " • Committed" : " • Draft"}
-            {isDirty ? " • Unsaved changes" : ""}
-          </div>
-          <div style={{ fontSize: 11, opacity: 0.55, marginTop: 4, fontFamily: "monospace" }}>
-            {debugLine}
-          </div>
+          {isPending && nav.position && nav.total ? (
+            <div
+              style={{
+                marginTop: 2,
+                fontSize: 12,
+                fontWeight: 700,
+                color: "#6b7280",
+              }}
+            >
+              ({nav.position} of {nav.total})
+            </div>
+          ) : null}
         </div>
 
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -428,8 +443,6 @@ export default function ReviewForm({
           </button>
         </div>
       </div>
-
-      <h1 style={{ fontSize: 22, fontWeight: 700 }}>Review</h1>
 
       {/* Narrative side-by-side */}
       <div style={card}>
