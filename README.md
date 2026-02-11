@@ -691,3 +691,20 @@ cycle_employee_summary_public (guarded by released_at is not null)
 optionally a safer rollup view for scores (only final_score + rating, no category breakdown unless you want it)
 
 And you can leave reviews_employee_view as-is for later, or repurpose it if you decide employees should see per-review narratives after release.
+
+## Cycle Management (Admin)
+
+The **Manage Cycles** page now supports setting the **global active review cycle**.
+
+### What’s new
+- Admins can designate a cycle as the **current (global active) cycle** directly from the **Manage Cycles** page.
+- The active cycle is stored centrally and applied consistently across the app.
+- On load, the system:
+  - Selects the global active cycle if one exists.
+  - Falls back to the most recent open cycle if none is set.
+- The UI clearly indicates when the selected cycle is the current global cycle.
+
+### Implementation details
+- Global active cycle is persisted via the `app_settings` table (`active_cycle_id`).
+- Admin-only API endpoints handle reading and updating the active cycle.
+- Existing cycle creation, editing, and rubric-mapping functionality remains unchanged.
