@@ -48,10 +48,12 @@ export default async function ReviewAssignmentPage(props: {
     .select("released_at")
     .eq("cycle_id", assignment.cycle_id)
     .eq("employee_id", assignment.employee_id)
-    .maybeSingle();
+    // database.types.ts is stale; keep cast local
+    .maybeSingle<{ released_at: string | null }>();
 
   if (relErr) return <pre style={{ padding: 16 }}>{JSON.stringify(relErr, null, 2)}</pre>;
   const releasedAt = relRow?.released_at ?? null;
+
 
   // 2) Employee + profile (safe)
   const { data: employeeRow, error: empErr } = await supabase

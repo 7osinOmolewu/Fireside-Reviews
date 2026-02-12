@@ -35,16 +35,23 @@ export async function PUT(
     }
 
     // you need releasedAt from review_cycles or your resolver
-    const { data: cycle, error: cycleErr } = await supabase
-      .from("review_cycles")
+    // ✅ Guard must match client behavior: released is per employee-cycle
+    const { data: relRow, error: relErr } = await supabase
+      .from("cycle_employee_summary_public")
       .select("released_at")
-      .eq("id", review.cycle_id)
-      .maybeSingle();
+      .eq("cycle_id", review.cycle_id)
+      .eq("employee_id", review.employee_id)
+      .maybeSingle<{ released_at: string | null }>();
 
-    if (cycleErr) return NextResponse.json({ error: cycleErr.message }, { status: 400 });
+    if (relErr) {
+      return NextResponse.json({ error: relErr.message }, { status: 400 });
+    }
 
-    if (cycle?.released_at) {
-      return NextResponse.json({ error: "Cannot toggle after cycle is released" }, { status: 400 });
+    if (relRow?.released_at) {
+      return NextResponse.json(
+        { error: "Cannot toggle after cycle is released" },
+        { status: 400 }
+      );
     }
 
     // isAdmin check depends on your auth model (profiles/admin_users/etc)
@@ -62,10 +69,13 @@ export async function PUT(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const { error: updErr } = await supabase
+     const { error: updErr } = await supabase
       .from("reviews")
-      .update({ narrative_share_with_employee: share })
+      // database.types.ts currently does not include narrative_share_with_employee,
+      // but the app reads it elsewhere. Minimal cast to avoid widening types across the app.
+      .update({ narrative_share_with_employee: share } as unknown as Record<string, unknown>)
       .eq("id", review.id);
+
 
     if (updErr) {
       return NextResponse.json({ error: updErr.message }, { status: 400 });

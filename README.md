@@ -396,7 +396,8 @@ Never modify production schema manually.
 - Smallest viable change first
 - Never duplicate generated types
 - Never regenerate types to a different path without updating imports
-
+> Tip: when using `grep`, always exclude generated folders (`node_modules`, `.next`, `.git`) or results will be noisy.
+- Note: Git Bash on Windows does not include `rg` (ripgrep) by default — use `grep -RIn --exclude-dir=node_modules --exclude-dir=.next "pattern" .` instead.
 ---
 
 # Local Development Notes
@@ -433,3 +434,56 @@ Admin toggle wired
 Reviews layout approved  
 Design system stable  
 Admin wiring ongoing
+
+---
+
+## 🧪 Test References (Do Not Delete)
+
+These records are used for validating review flows, release behavior, and admin controls.
+
+### Released + Submitted Employee (Post-Release Validation)
+
+- **Employee Name:** Yemi  
+- **employee_id:** `1667c646-44e8-4b66-9dfd-8674a4971081`  
+- **cycle_id (Feb cycle):** `4e5b4394-8670-431b-9186-a4232cfbe005`  
+- **email:** `tosin.omolewu@gmail.com`  
+- **State:**  
+  - Review = submitted  
+  - Employee cycle = released  
+
+Used for validating:
+- Share toggle disabled after release  
+- Narrative visibility behavior  
+- Employee page rendering post-release  
+- Summary + final score display logic  
+
+---
+
+### Admin User (Required for Release + Toggle Tests)
+
+- **Name:** Delia  
+- **email:** `tosin@firesidepharmacy.com`  
+- **uuid:** `508ea87a-a32a-4674-b912-6c4c19d68894`  
+- **Role:** Admin  
+
+Used for validating:
+- Share with employee toggle  
+- Release employee cycle RPC  
+- Admin-only controls  
+- RLS admin override policies  
+
+---
+
+## 🔁 Session Restore Checklist
+
+When resuming work:
+
+1. Confirm Feb cycle exists (`4e5b4394-8670-431b-9186-a4232cfbe005`)
+2. Confirm Yemi remains released in `cycle_employee_summary_public`
+3. Confirm review for Yemi is still `submitted`
+4. Confirm Delia can:
+   - Toggle narrative (if not released)
+   - Release employee cycle
+   - Access admin routes
+
+---

@@ -169,7 +169,7 @@ export default function ReviewForm({
     const nextScores = computedInitialScoreRows;
 
     const nextShare = Boolean(existingReview?.narrative_share_with_employee);
-      setShareWithEmployee(nextShare);
+    if (!toggling) setShareWithEmployee(nextShare);
 
     // guard: if user typed and incoming is empty, don't wipe
     const incomingHasAny = nextNarrative.trim().length > 0;
@@ -183,7 +183,7 @@ export default function ReviewForm({
 
     lastHydrateKeyRef.current = hydrateKey;
     setErrorMsg(null);
-  }, [hydrateKey, computedInitialScoreRows, existingReview, isDirty]);
+  }, [hydrateKey, computedInitialScoreRows, existingReview, isDirty, toggling]);
 
   const nav = useMemo(() => {
     const ids = pendingAssignmentIds ?? [];
@@ -357,35 +357,41 @@ export default function ReviewForm({
     }
   }
 
-  async function handleToggleShare(next: boolean) {
+    async function handleToggleShare(next: boolean) {
     if (!canToggleShare) return;
-    
+
+    const prev = shareWithEmployee;
+
     setToggling(true);
-    
-    // optimistic update o it flips instantly
-    setShareWithEmployee(next);
+    setErrorMsg(null);
+    setShareWithEmployee(next);     // optimistic update so it flips instantly
 
     try {
-      const res = await fetch(
-        `/api/reviews/${assignmentId}/share-narrative`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ share: next }),
-        }
-      );
+      const res = await fetch(`/api/reviews/${assignmentId}/share-narrative`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ share: next }),
+      });
+
+      const j = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j?.error || "Failed to update share setting");
+        const msg =
+          (typeof j?.error === "string" ? j.error : null) ??
+          j?.message ??
+          "Failed to update share setting";
+        throw new Error(msg);
       }
-      } catch (err: any) {
-        // rollback on failure
-        setShareWithEmployee((prev) => !prev);
-        setErrorMsg(err?.message || "Failed to update share setting");
-      } finally {
-        setToggling(false);
-      }
+
+      // trust server echo (no router.refresh)
+      setShareWithEmployee(Boolean(j?.share));
+    } catch (err: unknown) {
+      setShareWithEmployee(prev); // deterministic rollback
+      const msg = err instanceof Error ? err.message : "Failed to update share setting";
+      setErrorMsg(msg);
+    } finally {
+      setToggling(false);
+    }
   }
 
   return (
