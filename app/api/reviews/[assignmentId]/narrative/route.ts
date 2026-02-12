@@ -13,14 +13,7 @@ export async function PUT(
 
   const body = await req.json().catch(() => ({}));
 
-  // IMPORTANT: do not coerce to null unless you truly want to overwrite.
-  // If UI sends "", we keep "".
-  const summary_reviewer_private =
-    typeof body?.summary_reviewer_private === "string" ? body.summary_reviewer_private : "";
-
-  const summary_employee_visible =
-    typeof body?.summary_employee_visible === "string" ? body.summary_employee_visible : "";
-
+  const narrative = typeof body?.narrative === "string" ? body.narrative : "";
   const submit = body?.submit === true;
 
   // Load assignment (RLS should restrict this, but we validate too)
@@ -31,15 +24,11 @@ export async function PUT(
     .single();
 
   if (raErr) return NextResponse.json({ error: raErr }, { status: 400 });
-  if (!ra?.is_active)
-    return NextResponse.json({ error: "Assignment is not active" }, { status: 400 });
-  if (ra.reviewer_id !== auth.user.id)
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!ra?.is_active) return NextResponse.json({ error: "Assignment is not active" }, { status: 400 });
+  if (ra.reviewer_id !== auth.user.id) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const nextStatus = submit ? "submitted" : "draft";
 
-  // ✅ Single-row guarantee: UPSERT by assignment_id (matches reviews_one_per_assignment)
-  // Also ensures we never trip the unique constraint again.
   const upsertPayload: any = {
     assignment_id: assignmentId,
     cycle_id: ra.cycle_id,
@@ -47,8 +36,7 @@ export async function PUT(
     reviewer_id: ra.reviewer_id,
     reviewer_type: ra.reviewer_type,
     status: nextStatus,
-    summary_reviewer_private,
-    summary_employee_visible,
+    summary_employee_visible: narrative,
     submitted_at: submit ? new Date().toISOString() : null,
     updated_at: new Date().toISOString(),
   };

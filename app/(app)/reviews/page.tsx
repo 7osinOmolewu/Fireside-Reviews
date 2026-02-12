@@ -2,7 +2,7 @@ import Link from "next/link";
 import { PageHeader } from "@/app/_components/page-header";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabaseServer";
-import type { Database } from "@/supabase/types/database.types";
+import type { Database } from "@/lib/database.types";
 import { resolveCycleServer } from "@/lib/activeCycleServer";
 import { getCycleLabel } from "@/lib/cycleLabel";
 import Image from "next/image";

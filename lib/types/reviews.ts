@@ -20,7 +20,6 @@ export type AssignmentPayload = Pick<
         ReviewRow,
         | "id"
         | "status"
-        | "summary_reviewer_private"
         | "summary_employee_visible"
         | "submitted_at"
       > & {

@@ -20,6 +20,16 @@ export default async function ReviewAssignmentPage(props: {
   const { data: auth } = await supabase.auth.getUser();
   if (!auth?.user) redirect("/login");
 
+  const { data: adminRow, error: adminErr } = await supabase
+    .from("admin_users")
+    .select("id")
+    .eq("id", auth.user.id)
+    .maybeSingle();
+
+  if (adminErr) return <pre style={{ padding: 16 }}>{JSON.stringify(adminErr, null, 2)}</pre>;
+  const isAdmin = Boolean(adminRow?.id);
+
+
   // 1) Assignment row only
   const { data: assignment, error } = await supabase
     .from("review_assignments")
@@ -31,6 +41,17 @@ export default async function ReviewAssignmentPage(props: {
   if (!assignment) {
     return <pre style={{ padding: 16 }}>No assignment found for id: {assignmentId}</pre>;
   }
+
+  // ✅ released state for this employee-cycle (locks share toggle once released)
+  const { data: relRow, error: relErr } = await supabase
+    .from("cycle_employee_summary_public")
+    .select("released_at")
+    .eq("cycle_id", assignment.cycle_id)
+    .eq("employee_id", assignment.employee_id)
+    .maybeSingle();
+
+  if (relErr) return <pre style={{ padding: 16 }}>{JSON.stringify(relErr, null, 2)}</pre>;
+  const releasedAt = relRow?.released_at ?? null;
 
   // 2) Employee + profile (safe)
   const { data: employeeRow, error: empErr } = await supabase
@@ -67,7 +88,7 @@ export default async function ReviewAssignmentPage(props: {
       reviewer_id,
       reviewer_type,
       status,
-      summary_reviewer_private,
+      narrative_share_with_employee,
       summary_employee_visible,
       submitted_at,
       updated_at,
@@ -80,7 +101,7 @@ export default async function ReviewAssignmentPage(props: {
         final_score,
         updated_at,
         created_at
-      )
+      )  
     `
     )
     .eq("assignment_id", assignmentId)
@@ -207,6 +228,8 @@ export default async function ReviewAssignmentPage(props: {
         isPending={isPending}
         cycleLabel={cycleLabel}
         cycleQS={cycleQS}
+        isAdmin={isAdmin}
+        releasedAt={releasedAt}
       />
     </div>
   );

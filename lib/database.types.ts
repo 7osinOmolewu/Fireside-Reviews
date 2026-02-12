@@ -7,10 +7,30 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
-  __InternalSupabase: {
-    PostgrestVersion: "14.1"
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
   }
   public: {
     Tables: {
@@ -23,24 +43,6 @@ export type Database = {
         }
         Update: {
           id?: string
-        }
-        Relationships: []
-      }
-      app_settings: {
-        Row: {
-          key: string
-          updated_at: string
-          value: string | null
-        }
-        Insert: {
-          key: string
-          updated_at?: string
-          value?: string | null
-        }
-        Update: {
-          key?: string
-          updated_at?: string
-          value?: string | null
         }
         Relationships: []
       }
@@ -85,66 +87,6 @@ export type Database = {
           },
         ]
       }
-      cycle_employee_outcomes: {
-        Row: {
-          calibration_adjustment: number
-          computed_weighted_score: number | null
-          created_at: string
-          cycle_id: string
-          employee_id: string
-          final_rating: string | null
-          final_score: number | null
-          id: string
-          released_at: string | null
-          summary_admin_private: string | null
-          summary_employee_visible_final: string | null
-          updated_at: string
-        }
-        Insert: {
-          calibration_adjustment?: number
-          computed_weighted_score?: number | null
-          created_at?: string
-          cycle_id: string
-          employee_id: string
-          final_rating?: string | null
-          final_score?: number | null
-          id?: string
-          released_at?: string | null
-          summary_admin_private?: string | null
-          summary_employee_visible_final?: string | null
-          updated_at?: string
-        }
-        Update: {
-          calibration_adjustment?: number
-          computed_weighted_score?: number | null
-          created_at?: string
-          cycle_id?: string
-          employee_id?: string
-          final_rating?: string | null
-          final_score?: number | null
-          id?: string
-          released_at?: string | null
-          summary_admin_private?: string | null
-          summary_employee_visible_final?: string | null
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "cycle_employee_outcomes_cycle_id_fkey"
-            columns: ["cycle_id"]
-            isOneToOne: false
-            referencedRelation: "review_cycles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "cycle_employee_outcomes_employee_id_fkey"
-            columns: ["employee_id"]
-            isOneToOne: false
-            referencedRelation: "employees"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       cycle_employee_summary: {
         Row: {
           admin_calibration_notes: string | null
@@ -160,7 +102,6 @@ export type Database = {
           performance_rating:
             | Database["public"]["Enums"]["performance_rating"]
             | null
-          performance_rating_value: number | null
           primary_final_score: number | null
           primary_review_id: string
           updated_at: string
@@ -179,7 +120,6 @@ export type Database = {
           performance_rating?:
             | Database["public"]["Enums"]["performance_rating"]
             | null
-          performance_rating_value?: number | null
           primary_final_score?: number | null
           primary_review_id: string
           updated_at?: string
@@ -198,7 +138,6 @@ export type Database = {
           performance_rating?:
             | Database["public"]["Enums"]["performance_rating"]
             | null
-          performance_rating_value?: number | null
           primary_final_score?: number | null
           primary_review_id?: string
           updated_at?: string
@@ -232,13 +171,6 @@ export type Database = {
             referencedRelation: "reviews"
             referencedColumns: ["id"]
           },
-          {
-            foreignKeyName: "cycle_employee_summary_primary_review_id_fkey"
-            columns: ["primary_review_id"]
-            isOneToOne: false
-            referencedRelation: "reviews_employee_view"
-            referencedColumns: ["id"]
-          },
         ]
       }
       cycle_employee_summary_public: {
@@ -247,14 +179,9 @@ export type Database = {
           cycle_id: string
           employee_id: string
           final_narrative_employee_visible: string
-          final_score: number | null
           finalized_at: string
           id: string
           performance_rating: Database["public"]["Enums"]["performance_rating"]
-          performance_rating_value: number | null
-          released_at: string | null
-          released_by: string | null
-          summary_employee_visible: string | null
           updated_at: string
         }
         Insert: {
@@ -262,14 +189,9 @@ export type Database = {
           cycle_id: string
           employee_id: string
           final_narrative_employee_visible: string
-          final_score?: number | null
           finalized_at: string
           id?: string
           performance_rating: Database["public"]["Enums"]["performance_rating"]
-          performance_rating_value?: number | null
-          released_at?: string | null
-          released_by?: string | null
-          summary_employee_visible?: string | null
           updated_at?: string
         }
         Update: {
@@ -277,14 +199,9 @@ export type Database = {
           cycle_id?: string
           employee_id?: string
           final_narrative_employee_visible?: string
-          final_score?: number | null
           finalized_at?: string
           id?: string
           performance_rating?: Database["public"]["Enums"]["performance_rating"]
-          performance_rating_value?: number | null
-          released_at?: string | null
-          released_by?: string | null
-          summary_employee_visible?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -644,13 +561,6 @@ export type Database = {
             referencedRelation: "reviews"
             referencedColumns: ["id"]
           },
-          {
-            foreignKeyName: "review_scores_review_id_fkey"
-            columns: ["review_id"]
-            isOneToOne: true
-            referencedRelation: "reviews_employee_view"
-            referencedColumns: ["id"]
-          },
         ]
       }
       reviewer_rules: {
@@ -879,166 +789,7 @@ export type Database = {
       }
     }
     Views: {
-      employee_cycle_results_view: {
-        Row: {
-          cycle_id: string | null
-          employee_id: string | null
-          final_score: number | null
-          performance_rating:
-            | Database["public"]["Enums"]["performance_rating"]
-            | null
-          performance_rating_value: number | null
-          released_at: string | null
-          summary_employee_visible: string | null
-          updated_at: string | null
-        }
-        Insert: {
-          cycle_id?: string | null
-          employee_id?: string | null
-          final_score?: number | null
-          performance_rating?:
-            | Database["public"]["Enums"]["performance_rating"]
-            | null
-          performance_rating_value?: number | null
-          released_at?: string | null
-          summary_employee_visible?: string | null
-          updated_at?: string | null
-        }
-        Update: {
-          cycle_id?: string | null
-          employee_id?: string | null
-          final_score?: number | null
-          performance_rating?:
-            | Database["public"]["Enums"]["performance_rating"]
-            | null
-          performance_rating_value?: number | null
-          released_at?: string | null
-          summary_employee_visible?: string | null
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "cycle_employee_summary_public_cycle_id_fkey"
-            columns: ["cycle_id"]
-            isOneToOne: false
-            referencedRelation: "review_cycles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "cycle_employee_summary_public_employee_id_fkey"
-            columns: ["employee_id"]
-            isOneToOne: false
-            referencedRelation: "employees"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      review_scores_employee_view: {
-        Row: {
-          base_score: number | null
-          calibration_adjustment: number | null
-          created_at: string | null
-          final_score: number | null
-          review_id: string | null
-          updated_at: string | null
-        }
-        Insert: {
-          base_score?: number | null
-          calibration_adjustment?: number | null
-          created_at?: string | null
-          final_score?: number | null
-          review_id?: string | null
-          updated_at?: string | null
-        }
-        Update: {
-          base_score?: number | null
-          calibration_adjustment?: number | null
-          created_at?: string | null
-          final_score?: number | null
-          review_id?: string | null
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "review_scores_review_id_fkey"
-            columns: ["review_id"]
-            isOneToOne: true
-            referencedRelation: "reviews"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "review_scores_review_id_fkey"
-            columns: ["review_id"]
-            isOneToOne: true
-            referencedRelation: "reviews_employee_view"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      reviews_employee_view: {
-        Row: {
-          assignment_id: string | null
-          created_at: string | null
-          cycle_id: string | null
-          employee_id: string | null
-          finalized_at: string | null
-          id: string | null
-          reviewer_type: Database["public"]["Enums"]["reviewer_type"] | null
-          status: Database["public"]["Enums"]["review_status"] | null
-          submitted_at: string | null
-          summary_employee_visible: string | null
-          updated_at: string | null
-        }
-        Insert: {
-          assignment_id?: string | null
-          created_at?: string | null
-          cycle_id?: string | null
-          employee_id?: string | null
-          finalized_at?: string | null
-          id?: string | null
-          reviewer_type?: Database["public"]["Enums"]["reviewer_type"] | null
-          status?: Database["public"]["Enums"]["review_status"] | null
-          submitted_at?: string | null
-          summary_employee_visible?: string | null
-          updated_at?: string | null
-        }
-        Update: {
-          assignment_id?: string | null
-          created_at?: string | null
-          cycle_id?: string | null
-          employee_id?: string | null
-          finalized_at?: string | null
-          id?: string | null
-          reviewer_type?: Database["public"]["Enums"]["reviewer_type"] | null
-          status?: Database["public"]["Enums"]["review_status"] | null
-          submitted_at?: string | null
-          summary_employee_visible?: string | null
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "reviews_assignment_id_fkey"
-            columns: ["assignment_id"]
-            isOneToOne: true
-            referencedRelation: "review_assignments"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "reviews_cycle_id_fkey"
-            columns: ["cycle_id"]
-            isOneToOne: false
-            referencedRelation: "review_cycles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "reviews_employee_id_fkey"
-            columns: ["employee_id"]
-            isOneToOne: false
-            referencedRelation: "employees"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
+      [_ in never]: never
     }
     Functions: {
       admin_release_employee_cycle: {
@@ -1078,15 +829,10 @@ export type Database = {
         | { Args: { p_user_id: string }; Returns: boolean }
       make_employee_code: { Args: { p_role: string }; Returns: string }
       next_employee_number: { Args: { p_role: string }; Returns: number }
-      rating_to_value: {
-        Args: { r: Database["public"]["Enums"]["performance_rating"] }
-        Returns: number
-      }
       score_to_rating: {
         Args: { score: number }
         Returns: Database["public"]["Enums"]["performance_rating"]
       }
-      score_to_rating_value: { Args: { score: number }; Returns: number }
       upsert_employee: {
         Args: { p_hire_date: string; p_id: string; p_job_role_id: string }
         Returns: undefined
@@ -1224,6 +970,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       app_user_role: ["admin", "reviewer", "employee"],
@@ -1234,3 +983,4 @@ export const Constants = {
     },
   },
 } as const
+

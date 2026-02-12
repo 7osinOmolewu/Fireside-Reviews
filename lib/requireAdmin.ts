@@ -2,7 +2,7 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "@/supabase/types/database.types";
+import type { Database } from "@/lib/database.types";
 
 type AuthedAdmin = {
   supabase: SupabaseClient<Database>;

@@ -25,6 +25,8 @@ export default function ReviewForm({
   isPending,
   cycleLabel,
   cycleQS,
+  isAdmin,
+  releasedAt,
 }: {
   assignment: AssignmentPayload;
   rubricCategories: RubricCategoryRow[];
@@ -32,22 +34,13 @@ export default function ReviewForm({
   isPending: boolean;
   cycleLabel: string;
   cycleQS: string;
+  isAdmin: boolean;
+  releasedAt: string | null;
 }) {
   const router = useRouter();
 
   const assignmentId = assignment.id;
   const reviewerType = assignment.reviewer_type;
-
-  const reviewerLabel =
-    reviewerType === "primary"
-      ? "Primary Reviewer"
-      : reviewerType === "self"
-      ? "Self Review"
-      : reviewerType === "secondary"
-      ? "Secondary Reviewer"
-      : reviewerType === "peer"
-      ? "Peer Reviewer"
-      : String(reviewerType ?? "Reviewer");
 
   const employeeRow = asSingle<any>((assignment as any).employees);
   const profileRow = asSingle<any>(employeeRow?.profiles);
@@ -56,6 +49,13 @@ export default function ReviewForm({
   const existingReview: any = (assignment as any).reviews?.[0] ?? null;
   const reviewStatus = (existingReview?.status ?? "draft") as "draft" | "submitted";
   const isLocked = reviewStatus === "submitted";
+
+  const [shareWithEmployee, setShareWithEmployee] = useState<boolean>(
+    Boolean((existingReview as any)?.narrative_share_with_employee)
+  );
+  const canToggleShare = isAdmin && reviewStatus === "submitted" && !releasedAt;
+
+  const [toggling, setToggling] = useState(false);
 
   const existingScoreRow: any = existingReview?.review_scores?.[0] ?? null;
   const existingCategoryScores: Record<string, number> =
@@ -86,23 +86,25 @@ export default function ReviewForm({
   }, [rubricCategories, scoresFingerprint]);
 
   const initialScoreMapRef = useRef<Record<string, number>>({});
-  const initialPrivateRef = useRef<string>("");
-  const initialEmployeeRef = useRef<string>("");
+  const initialNarrativeRef = useRef<string>("");
 
-  const [privateSummary, setPrivateSummary] = useState(safeString(existingReview?.summary_reviewer_private));
-  const [employeeSummary, setEmployeeSummary] = useState(safeString(existingReview?.summary_employee_visible));
+  const [narrative, setNarrative] = useState(
+    safeString(existingReview?.summary_employee_visible)
+  );
   const [scoreRows, setScoreRows] = useState<ScoreRow[]>(computedInitialScoreRows);
 
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // seed initial refs once
   const seededRef = useRef(false);
   useEffect(() => {
     if (seededRef.current) return;
     seededRef.current = true;
 
-    initialPrivateRef.current = safeString(existingReview?.summary_reviewer_private);
-    initialEmployeeRef.current = safeString(existingReview?.summary_employee_visible);
+    initialNarrativeRef.current =
+     safeString(existingReview?.summary_employee_visible);
+
     initialScoreMapRef.current = Object.fromEntries(
       computedInitialScoreRows.map((r) => [r.key, r.score])
     );
@@ -112,8 +114,7 @@ export default function ReviewForm({
     if (saving) return false;
     if (isLocked) return false;
 
-    if (privateSummary !== initialPrivateRef.current) return true;
-    if (employeeSummary !== initialEmployeeRef.current) return true;
+    if (narrative !== initialNarrativeRef.current) return true;
 
     const initMap = initialScoreMapRef.current;
     for (const r of scoreRows) {
@@ -121,16 +122,13 @@ export default function ReviewForm({
       if (Number(r.score ?? SCORE_MIN) !== init) return true;
     }
     return false;
-  }, [privateSummary, employeeSummary, scoreRows, saving, isLocked]);
+  }, [narrative, scoreRows, saving, isLocked]);
 
-   const isNarrativeDirty = useMemo(() => {
+  const isNarrativeDirty = useMemo(() => {
     if (saving) return false;
     if (isLocked) return false;
-    return (
-      privateSummary !== initialPrivateRef.current ||
-      employeeSummary !== initialEmployeeRef.current
-    );
-  }, [privateSummary, employeeSummary, saving, isLocked]);
+    return narrative !== initialNarrativeRef.current;
+  }, [narrative, saving, isLocked]);
 
   const isScoresDirty = useMemo(() => {
     if (saving) return false;
@@ -150,28 +148,37 @@ export default function ReviewForm({
 
   const hydrateKey = useMemo(() => {
     const rid = String(existingReview?.id ?? "");
-    const priv = safeString(existingReview?.summary_reviewer_private);
-    const emp = safeString(existingReview?.summary_employee_visible);
-    return `${assignmentId}|${rid}|${priv}|${emp}|${scoresFingerprint}|${reviewStatus}`;
-  }, [assignmentId, existingReview?.id, existingReview?.summary_reviewer_private, existingReview?.summary_employee_visible, scoresFingerprint, reviewStatus]);
+    const nar = safeString(existingReview?.summary_employee_visible);
+    const share = String(Boolean((existingReview as any)?.narrative_share_with_employee));
+    return `${assignmentId}|${rid}|${nar}|${share}|${scoresFingerprint}|${reviewStatus}`;
+  }, [
+    assignmentId,
+    existingReview?.id,
+    existingReview?.summary_employee_visible,
+    (existingReview as any)?.narrative_share_with_employee,
+    scoresFingerprint,
+    reviewStatus,
+  ]);
 
   useEffect(() => {
     if (hydrateKey === lastHydrateKeyRef.current) return;
 
-    const nextPrivate = safeString(existingReview?.summary_reviewer_private);
-    const nextEmployee = safeString(existingReview?.summary_employee_visible);
+    const nextNarrative =
+      safeString(existingReview?.summary_employee_visible);
+
     const nextScores = computedInitialScoreRows;
 
+    const nextShare = Boolean(existingReview?.narrative_share_with_employee);
+      setShareWithEmployee(nextShare);
+
     // guard: if user typed and incoming is empty, don't wipe
-    const incomingHasAny = nextPrivate.trim().length > 0 || nextEmployee.trim().length > 0;
+    const incomingHasAny = nextNarrative.trim().length > 0;
     if (isDirty && !incomingHasAny) return;
 
-    setPrivateSummary(nextPrivate);
-    setEmployeeSummary(nextEmployee);
+    setNarrative(nextNarrative);
     setScoreRows(nextScores);
 
-    initialPrivateRef.current = nextPrivate;
-    initialEmployeeRef.current = nextEmployee;
+    initialNarrativeRef.current = nextNarrative;
     initialScoreMapRef.current = Object.fromEntries(nextScores.map((r) => [r.key, r.score]));
 
     lastHydrateKeyRef.current = hydrateKey;
@@ -200,8 +207,7 @@ export default function ReviewForm({
 
   const validation = useMemo(() => {
     const missing: string[] = [];
-    if (!privateSummary.trim()) missing.push("Reviewer Narrative (Private)");
-    if (!employeeSummary.trim()) missing.push("Employee Summary (Visible)");
+    if (!narrative.trim()) missing.push("Narrative");
 
     if (canScore) {
       const scoredCats = (rubricCategories ?? []).filter((c) => c.is_scored !== false);
@@ -216,7 +222,7 @@ export default function ReviewForm({
     }
 
     return { missing, ok: missing.length === 0 };
-  }, [privateSummary, employeeSummary, canScore, rubricCategories, scoreRows]);
+  }, [narrative, canScore, rubricCategories, scoreRows]);
 
   function confirmCommit(): boolean {
     if (!validation.ok) {
@@ -240,11 +246,7 @@ export default function ReviewForm({
       const res = await fetch(`/api/reviews/${assignmentId}/narrative`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          summary_reviewer_private: privateSummary,
-          summary_employee_visible: employeeSummary,
-          submit: false,
-        }),
+          body: JSON.stringify({ narrative, submit: false })
       });
 
       const json = await res.json().catch(() => ({}));
@@ -258,11 +260,9 @@ export default function ReviewForm({
         return;
       }
 
-      initialPrivateRef.current = privateSummary;
-      initialEmployeeRef.current = employeeSummary;
-
+      initialNarrativeRef.current = narrative;
       window.alert("Saved narrative.");
-      // IMPORTANT: no router.refresh() here; it can wipe state with an empty snapshot
+      // no router.refresh() here on purpose
     } finally {
       setSaving(false);
     }
@@ -333,11 +333,7 @@ export default function ReviewForm({
       const narRes = await fetch(`/api/reviews/${assignmentId}/narrative`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          summary_reviewer_private: privateSummary,
-          summary_employee_visible: employeeSummary,
-          submit: true,
-        }),
+        body: JSON.stringify({ narrative, submit: true }),
       });
 
       const narJson = await narRes.json().catch(() => ({}));
@@ -351,8 +347,7 @@ export default function ReviewForm({
         return;
       }
 
-      initialPrivateRef.current = privateSummary;
-      initialEmployeeRef.current = employeeSummary;
+      initialNarrativeRef.current = narrative;
       initialScoreMapRef.current = Object.fromEntries(scoreRows.map((r) => [r.key, r.score]));
 
       window.alert("Committed. This review is now locked.");
@@ -360,6 +355,37 @@ export default function ReviewForm({
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleToggleShare(next: boolean) {
+    if (!canToggleShare) return;
+    
+    setToggling(true);
+    
+    // optimistic update o it flips instantly
+    setShareWithEmployee(next);
+
+    try {
+      const res = await fetch(
+        `/api/reviews/${assignmentId}/share-narrative`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ share: next }),
+        }
+      );
+
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || "Failed to update share setting");
+      }
+      } catch (err: any) {
+        // rollback on failure
+        setShareWithEmployee((prev) => !prev);
+        setErrorMsg(err?.message || "Failed to update share setting");
+      } finally {
+        setToggling(false);
+      }
   }
 
   return (
@@ -390,8 +416,7 @@ export default function ReviewForm({
         >
           ←
         </button>
-        
-        {/* Center label */}
+
         <div
           style={{
             flex: 1,
@@ -402,34 +427,17 @@ export default function ReviewForm({
           }}
           title={`Reviewing ${employeeName}`}
         >
-          <div
-            style={{
-              fontSize: 28,
-              fontWeight: 800,
-              color: "#111827",
-              lineHeight: 1.1,
-            }}
-          >
+          <div style={{ fontSize: 28, fontWeight: 800, color: "#111827", lineHeight: 1.1 }}>
             Reviewing {employeeName}{" "}
-            <span style={{ fontSize: 24, fontWeight: 900, color: "#6b7280" }}>
-              ({cycleLabel})
-            </span>
+            <span style={{ fontSize: 24, fontWeight: 900, color: "#6b7280" }}>({cycleLabel})</span>
           </div>
 
           {isPending && nav.position && nav.total ? (
-            <div
-              style={{
-                marginTop: 2,
-                fontSize: 12,
-                fontWeight: 700,
-                color: "#6b7280",
-              }}
-            >
+            <div style={{ marginTop: 2, fontSize: 12, fontWeight: 700, color: "#6b7280" }}>
               ({nav.position} of {nav.total})
             </div>
           ) : null}
         </div>
-
 
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <button type="button" onClick={() => guardedPush(`/reviews${cycleQS}`)} style={btn}>
@@ -452,7 +460,7 @@ export default function ReviewForm({
         </div>
       </div>
 
-      {/* Narrative side-by-side */}
+      {/* Narrative */}
       <div style={card}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
           <div>
@@ -460,59 +468,66 @@ export default function ReviewForm({
             <div style={{ fontSize: 12, opacity: 0.7 }}>Save anytime. Commit locks both narrative and scores.</div>
           </div>
 
-         <button
-            disabled={saving || isLocked || !isNarrativeDirty}
-            onClick={saveNarrativeOnly}
-            style={
-              saving || isLocked || !isNarrativeDirty
-                ? btnPrimaryDisabled
-                : { ...btnPrimary, boxShadow: "0 0 0 3px rgba(0,0,0,0.08)" }
-            }
-            title={
-              isLocked
-                ? "This review is committed and locked"
-                : !isNarrativeDirty
-                ? "No narrative changes to save"
-                : "Saves both narrative fields"
-            }
-          >
-            Save Narrative (Both)
-         </button>
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            {isAdmin && (
+              <label
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "center",
+                  fontSize: 12,
+                  fontWeight: 800,
+                  opacity: 0.85,
+                }}
+                title={
+                  releasedAt
+                    ? "Cannot change after cycle is released to the employee"
+                    : reviewStatus !== "submitted"
+                    ? "Admin can toggle after submit"
+                    : "Toggle narrative visibility"
+                }
+              >
+                Share with employee
+                <input
+                  type="checkbox"
+                  checked={shareWithEmployee}
+                  disabled={saving || toggling || !canToggleShare}
+                  onChange={(e) => handleToggleShare(e.target.checked)}
+                />
+              </label>
+            )}
+
+            <button
+              disabled={saving || isLocked || !isNarrativeDirty}
+              onClick={saveNarrativeOnly}
+              style={
+                saving || isLocked || !isNarrativeDirty
+                  ? btnPrimaryDisabled
+                  : { ...btnPrimary, boxShadow: "0 0 0 3px rgba(0,0,0,0.08)" }
+              }
+              title={
+                isLocked
+                  ? "This review is committed and locked"
+                  : !isNarrativeDirty
+                  ? "No narrative changes to save"
+                  : "Save narrative"
+              }
+            >
+              Save Narrative
+            </button>
+          </div>
         </div>
 
-        <div
-          style={{
-            marginTop: 12,
-            display: "grid",
-            gridTemplateColumns: "1fr 1px 1fr",
-            gap: 12,
-            alignItems: "stretch",
-          }}
-        >
-          <div style={{ display: "grid", gap: 8 }}>
-            <div style={{ fontWeight: 700 }}>Reviewer Narrative (Private)</div>
-            <textarea
-              value={privateSummary}
-              onChange={(e) => setPrivateSummary(e.target.value)}
-              rows={14}
-              disabled={saving || isLocked}
-              style={textareaStyle(isLocked)}
-            />
-            <div style={{ fontSize: 12, opacity: 0.6 }}>Only visible to reviewers/admins.</div>
-          </div>
-
-          <div aria-hidden style={{ width: 1, background: "#e5e7eb", borderRadius: 1 }} />
-
-          <div style={{ display: "grid", gap: 8 }}>
-            <div style={{ fontWeight: 700 }}>Employee Summary (Visible)</div>
-            <textarea
-              value={employeeSummary}
-              onChange={(e) => setEmployeeSummary(e.target.value)}
-              rows={14}
-              disabled={saving || isLocked}
-              style={textareaStyle(isLocked)}
-            />
-            <div style={{ fontSize: 12, opacity: 0.6 }}>Visible to the employee when shared.</div>
+        <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+          <textarea
+            value={narrative}
+            onChange={(e) => setNarrative(e.target.value)}
+            rows={14}
+            disabled={saving || isLocked}
+            style={textareaStyle(isLocked)}
+          />
+          <div style={{ fontSize: 12, opacity: 0.6 }}>
+            Visible to the employee only if Admin enables “Share with employee” and the cycle is released.
           </div>
         </div>
       </div>
@@ -528,14 +543,10 @@ export default function ReviewForm({
               </div>
             </div>
 
-             <button
+            <button
               disabled={saving || isLocked || scoreRows.length === 0 || !isScoresDirty}
               onClick={saveScoresOnly}
-              style={
-                saving || isLocked || scoreRows.length === 0 || !isScoresDirty
-                  ? btnPrimaryDisabled
-                  : btnPrimary
-              }
+              style={saving || isLocked || scoreRows.length === 0 || !isScoresDirty ? btnPrimaryDisabled : btnPrimary}
               title={
                 isLocked
                   ? "This review is committed and locked"
