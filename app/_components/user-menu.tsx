@@ -64,16 +64,26 @@ export function UserMenu({
 
           <div className="h-px bg-orange-100" />
 
-          <form action="/api/auth/logout" method="post" className="p-1">
+           <div className="p-1">
             <button
-              type="submit"
+              type="button"
               className="w-full rounded-lg px-3 py-2 text-left text-sm font-semibold text-slate-900 hover:bg-orange-50"
               role="menuitem"
-              onClick={() => setOpen(false)}
+              onClick={async () => {
+                setOpen(false);
+
+                try {
+                  await fetch("/api/auth/logout", { method: "POST" });
+                } finally {
+                  // hard redirect guarantees fresh auth state
+                  window.location.href = "/login";
+                }
+              }}
             >
               Log out
             </button>
-          </form>
+          </div>
+
         </div>
       ) : null}
     </div>

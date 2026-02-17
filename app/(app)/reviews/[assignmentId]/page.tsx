@@ -3,18 +3,20 @@ import ReviewForm from "./review-form";
 import { createSupabaseServerClient } from "@/lib/supabaseServer";
 import { getCycleLabel } from "@/lib/cycleLabel";
 import { resolveCycleServer } from "@/lib/activeCycleServer";
+import ReviewAssignmentShell from "./review-assignment-shell";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function ReviewAssignmentPage(props: {
   params: Promise<{ assignmentId: string }>;
-  searchParams?: Promise<{ cycleId?: string }>;
+  searchParams?: Promise<{ cycleId?: string; status?: "draft" | "submitted" }>;
 }) {
   const { assignmentId } = await props.params;
 
   const sp = props.searchParams ? await props.searchParams : {};
   const cycleIdFromQS = sp.cycleId ?? null;
+  const statusFilter = sp.status ?? null;
 
   const supabase = await createSupabaseServerClient();
   const { data: auth } = await supabase.auth.getUser();
@@ -198,7 +200,40 @@ export default async function ReviewAssignmentPage(props: {
 
   const pendingAssignmentIds: string[] = (navAssignments ?? []).map((a) => a.id);
   const isPending = pendingAssignmentIds.includes(assignmentId);
- 
+
+  // bubble ordering only if filter is set
+  let navIds = pendingAssignmentIds;
+
+  if (statusFilter && pendingAssignmentIds.length) {
+    const { data: navReviews, error: navRevErr } = await supabase
+      .from("reviews")
+      .select("assignment_id, status")
+      .in("assignment_id", pendingAssignmentIds);
+
+    if (navRevErr) return <pre style={{ padding: 16 }}>{JSON.stringify(navRevErr, null, 2)}</pre>;
+
+    const navStatusByAssignmentId = new Map<string, "draft" | "submitted">();
+    (navReviews ?? []).forEach((r: any) => {
+      const s = r.status === "submitted" || r.status === "finalized" ? "submitted" : "draft";
+      navStatusByAssignmentId.set(r.assignment_id, s);
+    });
+
+    navIds = [...pendingAssignmentIds].sort((a, b) => {
+      const sa = navStatusByAssignmentId.get(a) ?? "draft";
+      const sb = navStatusByAssignmentId.get(b) ?? "draft";
+      const am = sa === statusFilter ? 0 : 1;
+      const bm = sb === statusFilter ? 0 : 1;
+      return am - bm;
+    });
+  }
+
+  // compute pointers OFF navIds
+  const idx = navIds.indexOf(assignmentId);
+  const prevId = idx > 0 ? navIds[idx - 1] : null;
+  const nextId = idx >= 0 && idx < navIds.length - 1 ? navIds[idx + 1] : null;
+  const position = idx >= 0 ? idx + 1 : null;
+  const total = navIds.length;
+
   // Fetch cycle names needed for label (open cycles + selected cycle)
   const cycleIdsForLabel = Array.from(
     new Set([...(cycle.openCycleIds ?? []), ...(cycle.selectedCycleId ? [cycle.selectedCycleId] : [])])
@@ -218,21 +253,24 @@ export default async function ReviewAssignmentPage(props: {
     cycleById,
   });
 
-  const cycleQS = cycle.cycleQS;
+  const filterQS = statusFilter ? `&status=${statusFilter}` : "";
+  const cycleQSWithFilter = `${cycle.cycleQS}${filterQS}`;
 
   return (
-    <div style={{ padding: 24, maxWidth: 900 }}>
-      <ReviewForm
-        key={assignmentId}
-        assignment={assignment as any}
-        rubricCategories={rubricCategories as any[]}
-        pendingAssignmentIds={pendingAssignmentIds}
-        isPending={isPending}
-        cycleLabel={cycleLabel}
-        cycleQS={cycleQS}
-        isAdmin={isAdmin}
-        releasedAt={releasedAt}
-      />
-    </div>
-  );
+  <ReviewAssignmentShell
+    assignmentId={assignmentId}
+    cycleLabel={cycleLabel}
+    cycleQS={cycleQSWithFilter}
+    isPending={isPending}
+    prevId={prevId}
+    nextId={nextId}
+    position={position}
+    total={total}
+    assignment={assignment as any}
+    rubricCategories={rubricCategories as any[]}
+    isAdmin={isAdmin}
+    releasedAt={releasedAt}
+  />
+);
+
 }

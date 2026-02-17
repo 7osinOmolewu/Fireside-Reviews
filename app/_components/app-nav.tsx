@@ -7,11 +7,12 @@ type NavItem = {
   label: string;
   href: string;
   icon: "inbox" | "admin";
+  adminOnly?: boolean;
 };
 
 const nav: NavItem[] = [
   { label: "Reviews", href: "/reviews", icon: "inbox" },
-  { label: "Admin", href: "/admin", icon: "admin" },
+  { label: "Admin", href: "/admin", icon: "admin", adminOnly: true },
 ];
 
 function cn(...classes: Array<string | false | null | undefined>) {
@@ -50,14 +51,15 @@ function Icon({ name }: { name: NavItem["icon"] }) {
   );
 }
 
-export function AppNav() {
+export function AppNav({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname();
+
+  const items = nav.filter((i) => !i.adminOnly || isAdmin);
 
   return (
     <nav className="space-y-1">
-      {nav.map((item) => {
-        const isActive =
-          pathname === item.href || pathname.startsWith(item.href + "/");
+      {items.map((item) => {
+        const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
 
         return (
           <Link

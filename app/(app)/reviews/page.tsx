@@ -24,6 +24,16 @@ function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
+function withStatusQS(cycleQS: string, status?: "draft" | "submitted" | null) {
+  const base = cycleQS && cycleQS.startsWith("?") ? cycleQS : "";
+  if (!status) return base;
+  return base ? `${base}&status=${status}` : `?status=${status}`;
+}
+
+function withoutStatusQS(cycleQS: string) {
+  return cycleQS && cycleQS.startsWith("?") ? cycleQS : "";
+}
+
 function Badge({
   label,
   tone = "neutral",
@@ -55,9 +65,11 @@ function Badge({
 export default async function ReviewsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ cycleId?: string }>;
+  searchParams: Promise<{ cycleId?: string; status?: "draft" | "submitted" }>;
 }) {
-  const { cycleId } = await searchParams;
+  const { cycleId, status } = await searchParams;
+  const statusFilter = status ?? null;
+
   const cycleIdFromQS = cycleId ?? null;
 
   const supabase = await createSupabaseServerClient();
@@ -78,8 +90,6 @@ export default async function ReviewsPage({
     .select("full_name, email")
     .eq("id", user.id)
     .maybeSingle();
-
-  const userName = profile?.full_name ?? profile?.email ?? user.email ?? "You";
 
   const { data: adminRow } = await supabase
     .from("admin_users")
@@ -129,10 +139,7 @@ export default async function ReviewsPage({
     cycleById,
   });
 
-  const overrideCycleId =
-    isAdmin && cycleIdFromQS && cycle.selectedCycleId === cycleIdFromQS
-      ? cycleIdFromQS
-      : null;
+  const listQS = withStatusQS(cycleQS, statusFilter);
 
   // 2) Fetch assignments
   const { data, error } = await supabase
@@ -159,7 +166,7 @@ export default async function ReviewsPage({
 
   if (error) return <pre className="p-4">{JSON.stringify(error, null, 2)}</pre>;
 
-  const assignments = (data ?? []) as unknown as AssignmentWithEmployee[];
+  let assignments = (data ?? []) as unknown as AssignmentWithEmployee[];
 
   // 3) Fetch reviews
   const assignmentIds = assignments.map((a) => a.id);
@@ -177,6 +184,25 @@ export default async function ReviewsPage({
   (reviewsData ?? []).forEach((r) =>
     reviewByAssignmentId.set(r.assignment_id, { id: r.id, status: r.status })
   );
+
+  const statusByAssignmentId = new Map<string, "draft" | "submitted">();
+  
+  assignments.forEach((a) => {
+    const review = reviewByAssignmentId.get(a.id);
+    const s = review?.status === "submitted" || review?.status === "finalized" ? "submitted" : "draft";
+    statusByAssignmentId.set(a.id, s);
+  });
+
+  if (statusFilter) {
+      assignments = [...assignments].sort((a, b) => {
+        const sa = statusByAssignmentId.get(a.id) ?? "draft";
+        const sb = statusByAssignmentId.get(b.id) ?? "draft";
+        // bubble matches first, keep original relative order otherwise
+        const am = sa === statusFilter ? 0 : 1;
+        const bm = sb === statusFilter ? 0 : 1;
+        return am - bm;
+      });
+  }
 
   // 4) Release state
   const employeeIds = Array.from(new Set(assignments.map((a) => a.employee_id).filter(Boolean)));
@@ -213,46 +239,7 @@ export default async function ReviewsPage({
     <PageHeader title="Reviews" description={`My review inbox (${cycleLabel})`} />
 
     {/* Warm page surface */}
-    <div className="rounded-2xl border bg-gradient-to-b from-[#fbf4ec] to-white p-4 sm:p-6">
-      {/* Top toolbar row */}
-      <div className="rounded-2xl border border-orange-100/70 bg-[#fff7f0]/60 p-4"></div>
-      <div className="rounded-2xl border border-orange-100/70 bg-[#fff7f0]/60 p-4"></div><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="text-sm text-slate-700">
-          Signed in as{" "}
-          <Link
-            href={`/employee${cycleQS}`}
-            className="font-semibold text-slate-900 underline underline-offset-2"
-          >
-            {userName}
-          </Link>
-          {isAdmin ? (
-            <span className="ml-2 align-middle">
-              <Badge label="Admin" tone="neutral" />
-            </span>
-          ) : null}
-
-          <span className="mx-2 text-slate-300">|</span>
-
-          Assignments:{" "}
-          <span className="font-semibold text-slate-900">
-            {assignments.length}
-          </span>
-
-          {overrideCycleId ? (
-            <>
-              <span className="mx-2 text-slate-300">|</span>
-              <Link
-                href="/reviews"
-                className="font-semibold underline underline-offset-2"
-              >
-                Clear cycle filter
-              </Link>
-            </>
-          ) : null}
-        </div>
-      </div>
-
-      {/* Status guide */}
+        {/* Status guide */}
       <div className="mt-5 flex flex-col gap-3 rounded-2xl border border-orange-100/70 bg-[#fff7f0]/70 p-4 sm:flex-row sm:items-center sm:justify-between shadow-[0_10px_30px_rgba(249,115,22,0.06)]">
         <div className="flex flex-wrap items-center gap-2">
           <div className="text-sm font-semibold text-slate-900">
@@ -285,19 +272,46 @@ export default async function ReviewsPage({
         </div>
 
         <div className="grid grid-cols-2 overflow-hidden rounded-xl border border-orange-100/70 bg-[#fffdfb]/60 shadow-[0_10px_30px_rgba(249,115,22,0.06)]">
-          <div className="px-4 py-2 text-sm">
-            Draft:{" "}
-            <span className="font-semibold text-slate-900">
-              {draftCount}
-            </span>
-          </div>
-          <div className="border-l px-4 py-2 text-sm">
-            Submitted:{" "}
-            <span className="font-semibold text-slate-900">
-              {submittedCount}
-            </span>
-          </div>
+        <div className="px-4 py-2 text-sm">
+          <Link
+            href={`/reviews${withStatusQS(cycleQS, "draft")}`}
+            className={cn(
+              "font-semibold underline underline-offset-2",
+              statusFilter === "draft" ? "text-slate-900" : "text-slate-700"
+            )}
+            title="Bubble draft reviews to the top"
+          >
+            Draft: <span className="text-slate-900">{draftCount}</span>
+          </Link>
         </div>
+
+        <div className="border-l px-4 py-2 text-sm">
+          <Link
+            href={`/reviews${withStatusQS(cycleQS, "submitted")}`}
+            className={cn(
+              "font-semibold underline underline-offset-2",
+              statusFilter === "submitted" ? "text-slate-900" : "text-slate-700"
+            )}
+            title="Bubble submitted reviews to the top"
+          >
+            Submitted: <span className="text-slate-900">{submittedCount}</span>
+          </Link>
+        </div>
+
+        {statusFilter ? (
+          <div className="border-l px-3 py-2">
+            <Link
+              href={`/reviews${withoutStatusQS(cycleQS)}`}
+              title="Clear status filter"
+              className="inline-flex items-center justify-center rounded-full border border-orange-100/70 bg-[#fff7f0]/60 text-slate-700 hover:bg-orange-50"
+              aria-label="Clear filter"
+            >
+              Clear Filter ✕
+            </Link>
+          </div>
+        ) : null}
+
+      </div>
       </div>
 
       {/* List */}
@@ -386,7 +400,7 @@ export default async function ReviewsPage({
                   </div>
 
                   <Link
-                    href={`/reviews/${a.id}${cycleQS}`}
+                    href={`/reviews/${a.id}${listQS}`}
                     className="inline-flex items-center justify-center rounded-xl border border-orange-200 bg-[#fff7f0] px-4 py-2 text-sm font-semibold text-slate-900 shadow-sm hover:bg-orange-50"
                   >
                     Open review
@@ -403,7 +417,7 @@ export default async function ReviewsPage({
           </div>
         )}
       </div>
-    </div>
+  
   </>
 );
 }

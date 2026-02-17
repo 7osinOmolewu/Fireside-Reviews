@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { AssignmentPayload, RubricCategoryRow } from "@/lib/types/reviews";
@@ -9,34 +10,108 @@ type ScoreRow = { key: string; label: string; score: number; weight: number | nu
 const SCORE_MIN = 0;
 const SCORE_MAX = 100;
 
-function asSingle<T>(v: any): T | null {
-  if (!v) return null;
-  return Array.isArray(v) ? (v[0] as T) : (v as T);
-}
+  function cn(...classes: Array<string | false | null | undefined>) {
+    return classes.filter(Boolean).join(" ");
+  }
 
-function safeString(v: any): string {
-  return typeof v === "string" ? v : "";
-}
+  function asSingle<T>(v: any): T | null {
+    if (!v) return null;
+    return Array.isArray(v) ? (v[0] as T) : (v as T);
+  }
 
-export default function ReviewForm({
-  assignment,
-  rubricCategories,
-  pendingAssignmentIds,
-  isPending,
-  cycleLabel,
-  cycleQS,
-  isAdmin,
-  releasedAt,
-}: {
-  assignment: AssignmentPayload;
-  rubricCategories: RubricCategoryRow[];
-  pendingAssignmentIds: string[];
-  isPending: boolean;
-  cycleLabel: string;
-  cycleQS: string;
-  isAdmin: boolean;
-  releasedAt: string | null;
-}) {
+  function safeString(v: any): string {
+    return typeof v === "string" ? v : "";
+  }
+
+  function Badge({
+    label,
+    tone = "neutral",
+    title,
+  }: {
+    label: string;
+    tone?: "neutral" | "success" | "warning";
+    title?: string;
+  }) {
+    const toneClasses: Record<string, string> = {
+      neutral: "bg-slate-50 text-slate-700 ring-slate-200",
+      success: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+      warning: "bg-amber-50 text-amber-800 ring-amber-200",
+    };
+
+    return (
+      <span
+        title={title}
+        className={cn(
+          "inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset",
+          toneClasses[tone] ?? toneClasses.neutral
+        )}
+      >
+        {label}
+      </span>
+    );
+  }
+
+  function Toggle({
+    checked,
+    disabled,
+    onChange,
+    label,
+    hint,
+  }: {
+    checked: boolean;
+    disabled: boolean;
+    onChange: (v: boolean) => void;
+    label: string;
+    hint?: string;
+  }) {
+    return (
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-slate-900">{label}</div>
+          {hint ? <div className="mt-0.5 text-xs text-slate-600">{hint}</div> : null}
+        </div>
+
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onChange(!checked)}
+          className={cn(
+            "relative inline-flex h-6 w-11 flex-none items-center rounded-full border transition",
+            disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer",
+            checked ? "bg-emerald-600 border-emerald-600" : "bg-slate-200 border-slate-300"
+          )}
+          aria-pressed={checked}
+          aria-label={label}
+        >
+          <span
+            className={cn(
+              "inline-block h-5 w-5 translate-x-0.5 rounded-full bg-white shadow transition",
+              checked ? "translate-x-5" : "translate-x-0.5"
+            )}
+          />
+        </button>
+      </div>
+    );
+  }
+
+  export default function ReviewForm({
+    assignment,
+    rubricCategories,
+    cycleLabel,
+    cycleQS,
+    isAdmin,
+    releasedAt,
+    onDirtyChange,
+  }: {
+    assignment: AssignmentPayload;
+    rubricCategories: RubricCategoryRow[];
+    cycleLabel: string;
+    cycleQS: string;
+    isAdmin: boolean;
+    releasedAt: string | null;
+    onDirtyChange?: (dirty: boolean) => void;
+  }) {
+
   const router = useRouter();
 
   const assignmentId = assignment.id;
@@ -88,9 +163,7 @@ export default function ReviewForm({
   const initialScoreMapRef = useRef<Record<string, number>>({});
   const initialNarrativeRef = useRef<string>("");
 
-  const [narrative, setNarrative] = useState(
-    safeString(existingReview?.summary_employee_visible)
-  );
+  const [narrative, setNarrative] = useState(safeString(existingReview?.summary_employee_visible));
   const [scoreRows, setScoreRows] = useState<ScoreRow[]>(computedInitialScoreRows);
 
   const [saving, setSaving] = useState(false);
@@ -102,12 +175,9 @@ export default function ReviewForm({
     if (seededRef.current) return;
     seededRef.current = true;
 
-    initialNarrativeRef.current =
-     safeString(existingReview?.summary_employee_visible);
+    initialNarrativeRef.current = safeString(existingReview?.summary_employee_visible);
 
-    initialScoreMapRef.current = Object.fromEntries(
-      computedInitialScoreRows.map((r) => [r.key, r.score])
-    );
+    initialScoreMapRef.current = Object.fromEntries(computedInitialScoreRows.map((r) => [r.key, r.score]));
   }, [existingReview, computedInitialScoreRows]);
 
   const isDirty = useMemo(() => {
@@ -123,6 +193,10 @@ export default function ReviewForm({
     }
     return false;
   }, [narrative, scoreRows, saving, isLocked]);
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   const isNarrativeDirty = useMemo(() => {
     if (saving) return false;
@@ -163,9 +237,7 @@ export default function ReviewForm({
   useEffect(() => {
     if (hydrateKey === lastHydrateKeyRef.current) return;
 
-    const nextNarrative =
-      safeString(existingReview?.summary_employee_visible);
-
+    const nextNarrative = safeString(existingReview?.summary_employee_visible);
     const nextScores = computedInitialScoreRows;
 
     const nextShare = Boolean(existingReview?.narrative_share_with_employee);
@@ -185,26 +257,6 @@ export default function ReviewForm({
     setErrorMsg(null);
   }, [hydrateKey, computedInitialScoreRows, existingReview, isDirty, toggling]);
 
-  const nav = useMemo(() => {
-    const ids = pendingAssignmentIds ?? [];
-    const idx = ids.indexOf(assignmentId);
-
-    const prevId = idx > 0 ? ids[idx - 1] : null;
-    const nextId = idx >= 0 && idx < ids.length - 1 ? ids[idx + 1] : null;
-
-    return { idx, prevId, nextId, position: idx >= 0 ? idx + 1 : null, total: ids.length };
-  }, [pendingAssignmentIds, assignmentId]);
-
-  function confirmLeave(): boolean {
-    if (!isDirty) return true;
-    return window.confirm("You have unsaved changes. Leave this review without saving?");
-  }
-
-  function guardedPush(href: string) {
-    if (!confirmLeave()) return;
-    router.push(href);
-  }
-
   const validation = useMemo(() => {
     const missing: string[] = [];
     if (!narrative.trim()) missing.push("Narrative");
@@ -215,8 +267,7 @@ export default function ReviewForm({
         for (const r of scoreRows) {
           const v = Number(r.score);
           if (!Number.isFinite(v)) missing.push(`Score: ${r.label}`);
-          else if (v < SCORE_MIN || v > SCORE_MAX)
-            missing.push(`Score range: ${r.label} (${SCORE_MIN}-${SCORE_MAX})`);
+          else if (v < SCORE_MIN || v > SCORE_MAX) missing.push(`Score range: ${r.label} (${SCORE_MIN}-${SCORE_MAX})`);
         }
       }
     }
@@ -227,8 +278,7 @@ export default function ReviewForm({
   function confirmCommit(): boolean {
     if (!validation.ok) {
       window.alert(
-        "Cannot commit yet. Please complete the following:\n\n" +
-          validation.missing.map((m) => `• ${m}`).join("\n")
+        "Cannot commit yet. Please complete the following:\n\n" + validation.missing.map((m) => `• ${m}`).join("\n")
       );
       return false;
     }
@@ -246,7 +296,7 @@ export default function ReviewForm({
       const res = await fetch(`/api/reviews/${assignmentId}/narrative`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ narrative, submit: false })
+        body: JSON.stringify({ narrative, submit: false }),
       });
 
       const json = await res.json().catch(() => ({}));
@@ -357,14 +407,14 @@ export default function ReviewForm({
     }
   }
 
-    async function handleToggleShare(next: boolean) {
+  async function handleToggleShare(next: boolean) {
     if (!canToggleShare) return;
 
     const prev = shareWithEmployee;
 
     setToggling(true);
     setErrorMsg(null);
-    setShareWithEmployee(next);     // optimistic update so it flips instantly
+    setShareWithEmployee(next);
 
     try {
       const res = await fetch(`/api/reviews/${assignmentId}/share-narrative`, {
@@ -376,17 +426,13 @@ export default function ReviewForm({
       const j = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        const msg =
-          (typeof j?.error === "string" ? j.error : null) ??
-          j?.message ??
-          "Failed to update share setting";
+        const msg = (typeof j?.error === "string" ? j.error : null) ?? j?.message ?? "Failed to update share setting";
         throw new Error(msg);
       }
 
-      // trust server echo (no router.refresh)
       setShareWithEmployee(Boolean(j?.share));
     } catch (err: unknown) {
-      setShareWithEmployee(prev); // deterministic rollback
+      setShareWithEmployee(prev);
       const msg = err instanceof Error ? err.message : "Failed to update share setting";
       setErrorMsg(msg);
     } finally {
@@ -394,309 +440,293 @@ export default function ReviewForm({
     }
   }
 
-  return (
-    <div style={{ display: "grid", gap: 16 }}>
-      {/* Header / nav */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-          border: "1px solid #eee",
-          borderRadius: 12,
-          padding: 12,
-          background: "white",
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => {
-            if (!isPending || !nav.prevId) return;
-            guardedPush(`/reviews/${nav.prevId}${cycleQS}`);
-          }}
-          disabled={!isPending || !nav.prevId}
-          style={{ ...btn, opacity: isPending && nav.prevId ? 1 : 0.4 }}
-          aria-label="Previous pending review"
-          title="Previous pending review"
-        >
-          ←
-        </button>
+  const isSubmitted = reviewStatus === "submitted";
+  const reviewStatusLabel = isSubmitted ? "Review status: Submitted ✔" : "Review status: Draft";
+  const reviewStatusTone = isSubmitted ? "success" : "warning";
 
-        <div
-          style={{
-            flex: 1,
-            textAlign: "center",
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-          title={`Reviewing ${employeeName}`}
-        >
-          <div style={{ fontSize: 28, fontWeight: 800, color: "#111827", lineHeight: 1.1 }}>
-            Reviewing {employeeName}{" "}
-            <span style={{ fontSize: 24, fontWeight: 900, color: "#6b7280" }}>({cycleLabel})</span>
+  const employeeVisibilityLabel = releasedAt ? "Employee visibility: Released" : "Employee visibility: Not released";
+  const employeeVisibilityTone = releasedAt ? "success" : "neutral";
+
+  const missingLabel = validation.ok ? "Ready to commit" : `${validation.missing.length} required item(s)`;
+
+  const scoredCats = useMemo(() => (rubricCategories ?? []).filter((c) => c.is_scored !== false), [rubricCategories]);
+  const completedScoresCount = useMemo(() => {
+    if (!canScore) return 0;
+    return scoreRows.filter((r) => Number.isFinite(Number(r.score))).length;
+  }, [scoreRows, canScore]);
+
+  return (
+    <div className="space-y-4">
+      {/* Sticky header */}
+      <div className="sticky top-4 z-10">
+        <div className="rounded-2xl border border-orange-100/70 bg-[#fff7f0]/80 p-4 shadow-[0_10px_30px_rgba(249,115,22,0.06)] backdrop-blur">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start gap-4">
+              
+
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="truncate text-lg font-semibold text-slate-900">Reviewing {employeeName}</div>
+                  <Badge label={reviewStatusLabel} tone={reviewStatusTone as any} />
+                  <Badge
+                    label={employeeVisibilityLabel}
+                    tone={employeeVisibilityTone as any}
+                    title={releasedAt ? `Released at ${releasedAt}` : "Not released to employee yet"}
+                  />
+                </div>
+
+                <div className="mt-1 text-sm text-slate-600">
+                  <span className="text-slate-500">Cycle:</span> {cycleLabel}
+                </div>
+
+                {isDirty && !isLocked ? (
+                  <div className="mt-1 text-xs font-semibold text-amber-800">Unsaved changes</div>
+                ) : isLocked ? (
+                  <div className="mt-1 text-xs font-semibold text-emerald-700">Committed and locked</div>
+                ) : (
+                  <div className="mt-1 text-xs text-slate-500">You can save anytime before commit.</div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 sm:justify-end">
+              <button
+                type="button"
+                disabled={saving || isLocked || !validation.ok}
+                onClick={commitReview}
+                className={cn(
+                  "inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold shadow-sm",
+                  saving || isLocked || !validation.ok
+                    ? "bg-slate-200 text-slate-600 cursor-not-allowed"
+                    : "bg-slate-900 text-white hover:bg-slate-800"
+                )}
+              >
+                Commit →
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+  
+      {/* Body: main + right rail */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_360px] lg:items-start">
+        {/* Main */}
+        <div className="space-y-4">
+          {/* Narrative card */}
+          <div className="rounded-2xl border border-orange-100/70 bg-[#fff7f0]/55 p-4 shadow-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="text-base font-semibold text-slate-900">Narrative</div>
+                <div className="mt-1 text-sm text-slate-600">
+                  Save anytime. Commit locks both narrative and scores.
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                <button
+                  type="button"
+                  disabled={saving || isLocked || !isNarrativeDirty}
+                  onClick={saveNarrativeOnly}
+                  className={cn(
+                    "inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold shadow-sm",
+                    saving || isLocked || !isNarrativeDirty
+                      ? "bg-slate-200 text-slate-600 cursor-not-allowed"
+                      : "bg-slate-900 text-white hover:bg-slate-800"
+                  )}
+                  title={
+                    isLocked
+                      ? "This review is committed and locked"
+                      : !isNarrativeDirty
+                      ? "No narrative changes to save"
+                      : "Save narrative"
+                  }
+                >
+                  Save Narrative
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-3 space-y-2">
+              <textarea
+                value={narrative}
+                onChange={(e) => setNarrative(e.target.value)}
+                rows={14}
+                disabled={saving || isLocked}
+                className={cn(
+                  "w-full rounded-2xl border border-orange-100/70 bg-white/70 p-3 text-sm text-slate-900 shadow-inner outline-none focus:ring-2 focus:ring-orange-200",
+                  isLocked ? "opacity-75" : ""
+                )}
+                placeholder="Write a clear summary that the employee can understand and act on."
+              />
+              <div className="text-xs text-slate-600">
+                Visible to the employee only if Admin enables “Share with employee” and the cycle is released.
+              </div>
+            </div>
           </div>
 
-          {isPending && nav.position && nav.total ? (
-            <div style={{ marginTop: 2, fontSize: 12, fontWeight: 700, color: "#6b7280" }}>
-              ({nav.position} of {nav.total})
+          {/* Scores card */}
+          {canScore ? (
+            <div className="rounded-2xl border border-orange-100/70 bg-[#fff7f0]/55 p-4 shadow-sm">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="text-base font-semibold text-slate-900">Scores</div>
+                  <div className="mt-1 text-sm text-slate-600">
+                    Required for commit. Range {SCORE_MIN} to {SCORE_MAX}.
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 sm:justify-end">
+                  <button
+                    type="button"
+                    disabled={saving || isLocked || scoreRows.length === 0 || !isScoresDirty}
+                    onClick={saveScoresOnly}
+                    className={cn(
+                      "inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold shadow-sm",
+                      saving || isLocked || scoreRows.length === 0 || !isScoresDirty
+                        ? "bg-slate-200 text-slate-600 cursor-not-allowed"
+                        : "bg-slate-900 text-white hover:bg-slate-800"
+                    )}
+                    title={
+                      isLocked
+                        ? "This review is committed and locked"
+                        : scoreRows.length === 0
+                        ? "No rubric categories available"
+                        : !isScoresDirty
+                        ? "No score changes to save"
+                        : "Save scores"
+                    }
+                  >
+                    Save Scores
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                {scoreRows.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-orange-200 bg-white/60 p-4 text-sm text-slate-600">
+                    No rubric categories available for scoring.
+                  </div>
+                ) : (
+                  scoreRows.map((r, idx) => (
+                    <div
+                      key={r.key}
+                      className="flex flex-col gap-2 rounded-2xl border border-orange-100/70 bg-white/60 p-4 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-slate-900">{r.label}</div>
+                        <div className="mt-0.5 text-xs text-slate-600">
+                          <span className="font-mono">{r.key}</span>
+                          {r.weight != null ? <span>{` · weight ${r.weight}`}</span> : null}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min={SCORE_MIN}
+                          max={SCORE_MAX}
+                          step={1}
+                          value={r.score}
+                          disabled={saving || isLocked}
+                          onChange={(e) => {
+                            const raw = Number(e.target.value);
+                            const v = Number.isFinite(raw)
+                              ? Math.min(SCORE_MAX, Math.max(SCORE_MIN, raw))
+                              : SCORE_MIN;
+
+                            setScoreRows((prev) => prev.map((x, i) => (i === idx ? { ...x, score: v } : x)));
+                          }}
+                          className={cn(
+                            "h-10 w-28 rounded-xl border border-orange-100/70 bg-white px-3 text-sm font-semibold text-slate-900 outline-none focus:ring-2 focus:ring-orange-200",
+                            isLocked ? "opacity-75" : ""
+                          )}
+                        />
+                        <div className="text-xs text-slate-600">/ {SCORE_MAX}</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : null}
+
+          {/* Error */}
+          {errorMsg ? (
+            <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-900 whitespace-pre-wrap">
+              {errorMsg}
             </div>
           ) : null}
         </div>
 
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button type="button" onClick={() => guardedPush(`/reviews${cycleQS}`)} style={btn}>
-            Exit
-          </button>
+        {/* Right rail */}
+        <div className="lg:sticky lg:top-24 space-y-4">
+          <div className="rounded-2xl border border-orange-100/70 bg-[#fff7f0]/55 p-4 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">Review Summary</div>
+                <div className="mt-1 text-xs text-slate-600">
+                  {isLocked ? "Locked after commit." : "Track completion and visibility."}
+                </div>
+              </div>
+              <Badge label={missingLabel} tone={validation.ok ? "success" : "warning"} />
+            </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              if (!isPending || !nav.nextId) return;
-              guardedPush(`/reviews/${nav.nextId}${cycleQS}`);
-            }}
-            disabled={!isPending || !nav.nextId}
-            style={{ ...btn, opacity: isPending && nav.nextId ? 1 : 0.4 }}
-            aria-label="Next pending review"
-            title="Next pending review"
-          >
-            →
-          </button>
-        </div>
-      </div>
+            <div className="mt-4 space-y-3 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-slate-600">Narrative</div>
+                <div className="font-semibold text-slate-900">{narrative.trim() ? "Complete" : "Required"}</div>
+              </div>
 
-      {/* Narrative */}
-      <div style={card}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
-          <div>
-            <div style={{ fontWeight: 800 }}>Narrative</div>
-            <div style={{ fontSize: 12, opacity: 0.7 }}>Save anytime. Commit locks both narrative and scores.</div>
-          </div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-slate-600">Scores</div>
+                <div className="font-semibold text-slate-900">
+                  {canScore ? `${completedScoresCount}/${scoredCats.length}` : "Not required"}
+                </div>
+              </div>
 
-          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-            {isAdmin && (
-              <label
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  alignItems: "center",
-                  fontSize: 12,
-                  fontWeight: 800,
-                  opacity: 0.85,
-                }}
-                title={
-                  releasedAt
-                    ? "Cannot change after cycle is released to the employee"
-                    : reviewStatus !== "submitted"
-                    ? "Admin can toggle after submit"
-                    : "Toggle narrative visibility"
-                }
-              >
-                Share with employee
-                <input
-                  type="checkbox"
-                  checked={shareWithEmployee}
-                  disabled={saving || toggling || !canToggleShare}
-                  onChange={(e) => handleToggleShare(e.target.checked)}
-                />
-              </label>
-            )}
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-slate-600">Status</div>
+                <div className="font-semibold text-slate-900">{isSubmitted ? "Submitted" : "Draft"}</div>
+              </div>
 
-            <button
-              disabled={saving || isLocked || !isNarrativeDirty}
-              onClick={saveNarrativeOnly}
-              style={
-                saving || isLocked || !isNarrativeDirty
-                  ? btnPrimaryDisabled
-                  : { ...btnPrimary, boxShadow: "0 0 0 3px rgba(0,0,0,0.08)" }
-              }
-              title={
-                isLocked
-                  ? "This review is committed and locked"
-                  : !isNarrativeDirty
-                  ? "No narrative changes to save"
-                  : "Save narrative"
-              }
-            >
-              Save Narrative
-            </button>
-          </div>
-        </div>
-
-        <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-          <textarea
-            value={narrative}
-            onChange={(e) => setNarrative(e.target.value)}
-            rows={14}
-            disabled={saving || isLocked}
-            style={textareaStyle(isLocked)}
-          />
-          <div style={{ fontSize: 12, opacity: 0.6 }}>
-            Visible to the employee only if Admin enables “Share with employee” and the cycle is released.
-          </div>
-        </div>
-      </div>
-
-      {/* Scores */}
-      {canScore && (
-        <div style={card}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
-            <div>
-              <div style={{ fontWeight: 800 }}>Scores</div>
-              <div style={{ fontSize: 12, opacity: 0.7 }}>
-                Required for Commit. Range {SCORE_MIN}–{SCORE_MAX}.
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-slate-600">Employee release</div>
+                <div className="font-semibold text-slate-900">{releasedAt ? "Released" : "Not released"}</div>
               </div>
             </div>
 
-            <button
-              disabled={saving || isLocked || scoreRows.length === 0 || !isScoresDirty}
-              onClick={saveScoresOnly}
-              style={saving || isLocked || scoreRows.length === 0 || !isScoresDirty ? btnPrimaryDisabled : btnPrimary}
-              title={
-                isLocked
-                  ? "This review is committed and locked"
-                  : scoreRows.length === 0
-                  ? "No rubric categories available"
-                  : !isScoresDirty
-                  ? "No score changes to save"
-                  : "Save scores"
-              }
-            >
-              Save Scores
-            </button>
-          </div>
+            {isAdmin ? (
+              <div className="mt-4 rounded-2xl border border-orange-100/70 bg-white/60 p-3">
+                <Toggle
+                  checked={shareWithEmployee}
+                  disabled={saving || toggling || !canToggleShare}
+                  onChange={(v) => handleToggleShare(v)}
+                  label="Share narrative with employee"
+                  hint={
+                    releasedAt
+                      ? "Locked after release."
+                      : reviewStatus !== "submitted"
+                      ? "Available after submit."
+                      : "Controls narrative visibility on release."
+                  }
+                />
+              </div>
+            ) : null}
 
-          <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-            {scoreRows.length === 0 ? (
-              <div style={{ opacity: 0.8 }}>No rubric categories available for scoring.</div>
-            ) : (
-              scoreRows.map((r, idx) => (
-                <div key={r.key} style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                  <div style={{ width: 360 }}>
-                    <div style={{ fontWeight: 700 }}>{r.label}</div>
-                    <div style={{ fontFamily: "monospace", fontSize: 12, opacity: 0.7 }}>
-                      {r.key}
-                      {r.weight != null ? ` (weight ${r.weight})` : ""}
-                    </div>
-                  </div>
-
-                  <input
-                    type="number"
-                    min={SCORE_MIN}
-                    max={SCORE_MAX}
-                    step={1}
-                    value={r.score}
-                    disabled={saving || isLocked}
-                    onChange={(e) => {
-                      const raw = Number(e.target.value);
-                      const v = Number.isFinite(raw)
-                        ? Math.min(SCORE_MAX, Math.max(SCORE_MIN, raw))
-                        : SCORE_MIN;
-
-                      setScoreRows((prev) => prev.map((x, i) => (i === idx ? { ...x, score: v } : x)));
-                    }}
-                    style={{
-                      width: 140,
-                      padding: 10,
-                      borderRadius: 12,
-                      border: "1px solid #ddd",
-                      opacity: isLocked ? 0.75 : 1,
-                    }}
-                  />
+            {!validation.ok && !isLocked ? (
+              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                <div className="font-semibold">To commit, complete:</div>
+                <div className="mt-2 space-y-1">
+                  {validation.missing.map((m) => (
+                    <div key={m}>• {m}</div>
+                  ))}
                 </div>
-              ))
-            )}
-          </div>
-        </div>
-      )}
+              </div>
+            ) : null}
 
-      {errorMsg && (
-        <div
-          style={{
-            marginTop: 6,
-            padding: 12,
-            borderRadius: 10,
-            border: "1px solid #fca5a5",
-            background: "#fef2f2",
-            color: "#991b1b",
-            fontSize: 13,
-            whiteSpace: "pre-wrap",
-          }}
-        >
-          {errorMsg}
         </div>
-      )}
-
-      {/* Commit */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 12,
-          marginTop: 8,
-          paddingTop: 8,
-          borderTop: "1px solid #eee",
-        }}
-      >
-        <div style={{ fontSize: 12, opacity: 0.7 }}>
-          {isLocked
-            ? "This review is committed and locked."
-            : validation.ok
-            ? "Ready to commit when you are."
-            : "Complete required fields to enable Commit."}
-        </div>
-
-        <button
-          type="button"
-          disabled={saving || isLocked || !validation.ok}
-          onClick={commitReview}
-          style={saving || isLocked || !validation.ok ? btnPrimaryDisabled : btnPrimary}
-          title={!validation.ok ? "Fill required fields to commit" : "Commit review"}
-        >
-          Commit Review →
-        </button>
       </div>
     </div>
+  </div>
   );
-}
-
-const btn: React.CSSProperties = {
-  padding: "10px 16px",
-  borderRadius: 12,
-  border: "1px solid #ddd",
-  background: "white",
-  cursor: "pointer",
-  fontWeight: 600,
-};
-
-const btnPrimary: React.CSSProperties = {
-  ...btn,
-  background: "#000",
-  border: "1px solid #000",
-  color: "#fff",
-};
-
-const btnPrimaryDisabled: React.CSSProperties = {
-  ...btnPrimary,
-  opacity: 0.45,
-  cursor: "not-allowed",
-};
-
-const card: React.CSSProperties = {
-  border: "1px solid #eee",
-  borderRadius: 12,
-  padding: 14,
-  background: "white",
-};
-
-function textareaStyle(isLocked: boolean): React.CSSProperties {
-  return {
-    width: "100%",
-    padding: 12,
-    borderRadius: 12,
-    border: "1px solid #ddd",
-    opacity: isLocked ? 0.75 : 1,
-  };
 }
