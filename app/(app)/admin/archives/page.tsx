@@ -331,7 +331,7 @@ export default function AdminArchivesPage() {
                                     Finalized {formatDateTime(row.finalized_at)} ·
                                     Released {formatDateTime(row.released_at)} ·
                                     Archived {formatDateTime(row.archived_at)}
-                                </div>
+                                </div> 
                               </div>
                             </div>
                           ))}
