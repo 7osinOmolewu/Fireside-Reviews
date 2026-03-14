@@ -113,9 +113,9 @@ export async function PATCH(
       // If role changed and not null, regenerate employee_code
       if (normalized !== null && normalized !== currentRoleId) {
         const { data: codeRow, error: codeErr } = await supabaseAdmin.rpc(
-          "generate_employee_code", { p_job_role_id: normalized }
-        )
-
+          "generate_employee_code",
+          { p_job_role_id: normalized }
+        );
 
         if (codeErr) {
           return NextResponse.json({ error: codeErr.message }, { status: 400 });
@@ -137,6 +137,63 @@ export async function PATCH(
     }
 
     return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    return NextResponse.json(
+      { error: e?.message ?? "Unknown error" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const admin = await requireAdmin();
+    const { id } = await params;
+
+    if (!id) {
+      return NextResponse.json(
+        { error: "Employee id is required" },
+        { status: 400 }
+      );
+    }
+
+    const { data: existingProfile, error: existingErr } = await supabaseAdmin
+      .from("profiles")
+      .select("id, full_name, email")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (existingErr) {
+      return NextResponse.json({ error: existingErr.message }, { status: 400 });
+    }
+
+    if (!existingProfile) {
+      // attempt cleanup anyway in case auth user exists but profile was already removed
+      await supabaseAdmin.auth.admin.deleteUser(id);
+      return NextResponse.json({ ok: true, cleanedOrphanUser: true });
+    }
+
+    const { error: deleteErr } = await supabaseAdmin.rpc(
+      "admin_hard_delete_employee",
+      {
+        p_employee_id: id,
+        p_deleted_by: admin.userId,
+      }
+    );
+
+    if (deleteErr) {
+      return NextResponse.json({ error: deleteErr.message }, { status: 400 });
+    }
+
+    return NextResponse.json({
+      ok: true,
+      deletedEmployeeId: id,
+      deletedEmployeeName: existingProfile.full_name ?? null,
+      deletedEmployeeEmail: existingProfile.email ?? null,
+    });
   } catch (e: any) {
     return NextResponse.json(
       { error: e?.message ?? "Unknown error" },

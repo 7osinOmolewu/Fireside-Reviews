@@ -4,15 +4,7 @@ import JobFamiliesTable from "./table";
 
 import Link from "next/link";
 
-export function BackToAdmin() {
-  return (
-    <div style={{ marginBottom: 16 }}>
-      <Link href="/admin" style={{ textDecoration: "underline" }}>
-        Back to Admin
-      </Link>
-    </div>
-  );
-}
+
 
 export default async function JobFamiliesPage() {
   await requireAdmin();
@@ -42,7 +34,7 @@ export default async function JobFamiliesPage() {
       <div className="mt-6">
         <JobFamiliesTable rows={data ?? []} />
       </div>
-      <div style={{ marginTop: 24 }}><BackToAdmin /></div>
+  
     </div>
   );
 }

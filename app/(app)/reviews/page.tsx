@@ -123,7 +123,7 @@ export default async function ReviewsPage({
   if (cycleIdsToUse.length === 0) {
     return (
       <div className="p-6">
-        <PageHeader title="Reviews" description="My review inbox (no active cycle found)" />
+        <PageHeader title="Pending Reviews" description="Your active review queue (no active cycle found)" />
         <div className="mt-4 rounded-xl border bg-white p-6 text-sm text-slate-600">
           No active cycle is available (no open cycles found).
         </div>
@@ -236,7 +236,7 @@ export default async function ReviewsPage({
 
  return (
   <>
-    <PageHeader title="Reviews" description={`My review inbox (${cycleLabel})`} />
+    <PageHeader title="Pending Reviews" description={`Your active review queue (${cycleLabel})`} />
 
     {/* Warm page surface */}
         {/* Status guide */}

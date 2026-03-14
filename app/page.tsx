@@ -18,7 +18,7 @@ export default function Home() {
       setStatus(`Signed in as: ${me.email ?? ""} (${me.role})`);
 
       if (me.role === "admin") window.location.href = "/admin";
-      else if (me.role === "reviewer") window.location.href = "/reviewer";
+      else if (me.role === "reviewer") window.location.href = "/reviews";
       else window.location.href = "/employee";
     })();
   }, []);

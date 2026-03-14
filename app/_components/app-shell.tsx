@@ -28,18 +28,26 @@ function RolePill({ label }: { label: "Admin" | "Reviewer" | "Employee" }) {
   );
 }
 
+type PendingReviewItem = {
+  id: string;
+  label: string;
+  href: string;
+};
+
 export function AppShell({
   children,
   isAuthenticated,
   userName,
   roleLabel,
   isAdmin,
+  pendingReviews = [],
 }: {
   children: React.ReactNode;
   isAuthenticated?: boolean;
   userName?: string | null;
   roleLabel: "Admin" | "Reviewer" | "Employee";
   isAdmin: boolean;
+  pendingReviews?: PendingReviewItem[];
 }) {
   return (
     <div className="min-h-screen bg-[#fbf4ec] text-slate-900">
@@ -65,7 +73,7 @@ export function AppShell({
 
       <div className="mx-auto grid w-full max-w-screen-2xl grid-cols-1 gap-6 px-6 py-6 md:grid-cols-[260px_1fr]">
         <aside className="rounded-2xl border border-orange-100/70 bg-[#fff7f0]/70 p-3 shadow-sm">
-          <AppNav isAdmin={isAdmin} />
+          <AppNav isAdmin={isAdmin} pendingReviews={pendingReviews} />
         </aside>
 
         <main className="rounded-2xl border border-orange-100/70 bg-[#fffdfb]/70 p-5 shadow-sm md:p-7">

@@ -286,7 +286,86 @@ released_at IS NOT NULL
 
 
 ---
+---
 
+# Release Guard Validation (System Confirmed)
+
+During Feb cycle validation, we confirmed:
+
+- `admin_release_employee_cycle` correctly sets:
+  - `released_at`
+  - `released_by`
+  - `performance_rating_value`
+- Release is idempotent
+- Employee visibility is gated strictly by:
+  - `cycle_employee_summary_public.released_at`
+- Employee page reads from:
+  - `cycle_employee_summary_public.final_narrative_employee_visible`
+- Employee page does **NOT** read from:
+  - `reviews.summary_employee_visible`
+- Reviewer inbox badges correctly reflect `released_at`
+- RLS policies verified and stable
+
+Validation performed via:
+- Authenticated debug route
+- Direct Postgres queries
+- UI login validation as employee
+
+No additional RLS modifications required.
+
+---
+
+# Narrative + Release Integrity
+
+End-to-end workflow confirmed:
+
+1. Reviewer submits narrative  
+2. Reviewer commits review  
+3. Admin releases employee (per employee per cycle)  
+4. Employee sees:
+   - Primary narrative  
+   - Secondary narrative (if committed)  
+   - Only after release  
+5. Release badge reflects correct state
+
+There are no remaining dual-narrative remnants.
+
+---
+
+# Release RPC Behavior
+
+RPC:
+
+`admin_release_employee_cycle(cycle_id uuid, employee_id uuid)`
+
+Current behavior:
+
+- Requires existing `cycle_employee_summary_public` row  
+- Throws if missing  
+- Sets `released_at` and `released_by`  
+- Computes `performance_rating_value`  
+- Writes to `audit_log`  
+- Is idempotent  
+- SECURITY DEFINER  
+- Admin-gated  
+
+Future optional hardening:
+
+- Add upsert guard to create summary row if missing  
+- Not required for current system stability  
+
+---
+
+# RLS State (Verified Stable)
+
+Confirmed policies:
+
+Employees can select:
+
+employee_id = auth.uid()
+AND finalized_at IS NOT NULL
+
+---
 # Visibility Rules (Non-Negotiable)
 
 | Role             | Can See                          |
@@ -434,7 +513,11 @@ Admin toggle wired
 Reviews layout approved  
 Design system stable  
 Admin wiring ongoing
-
+Release pipeline verified
+Employee visibility confirmed
+RLS stable
+Reviewer badge alignment correct
+No schema changes required
 ---
 
 ## 🧪 Test References (Do Not Delete)
@@ -470,7 +553,7 @@ Used for validating:
 - Share with employee toggle  
 - Release employee cycle RPC  
 - Admin-only controls  
-- RLS admin override policies  
+- RLS admin override policies   
 
 ---
 
