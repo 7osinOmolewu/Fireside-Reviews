@@ -74,6 +74,120 @@ CREATE TYPE "public"."reviewer_type" AS ENUM (
 ALTER TYPE "public"."reviewer_type" OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."admin_hard_delete_employee"("p_employee_id" "uuid", "p_deleted_by" "uuid") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_email text;
+  v_name text;
+begin
+  select p.email, p.full_name
+  into v_email, v_name
+  from public.profiles p
+  where p.id = p_employee_id;
+
+  if not found then
+    raise exception 'employee/profile not found for id %', p_employee_id;
+  end if;
+
+  insert into public.employee_cycle_history_archive (
+    employee_id,
+    employee_email,
+    employee_name,
+    cycle_id,
+    cycle_name,
+    performance_rating,
+    performance_rating_value,
+    final_narrative_employee_visible,
+    finalized_at,
+    released_at,
+    archived_by,
+    source
+  )
+  select
+    s.employee_id,
+    v_email,
+    v_name,
+    s.cycle_id,
+    rc.name,
+    coalesce(p.performance_rating, s.performance_rating),
+    coalesce(p.performance_rating_value, s.performance_rating_value),
+    coalesce(p.final_narrative_employee_visible, s.final_narrative_employee_visible),
+    coalesce(p.finalized_at, s.finalized_at),
+    p.released_at,
+    p_deleted_by,
+    'hard_delete'
+  from public.cycle_employee_summary s
+  left join public.cycle_employee_summary_public p
+    on p.cycle_id = s.cycle_id
+   and p.employee_id = s.employee_id
+  left join public.review_cycles rc
+    on rc.id = s.cycle_id
+  where s.employee_id = p_employee_id
+    and not exists (
+      select 1
+      from public.employee_cycle_history_archive a
+      where a.employee_id = s.employee_id
+        and a.cycle_id = s.cycle_id
+        and a.source = 'hard_delete'
+    );
+
+  insert into public.employee_cycle_history_archive (
+    employee_id,
+    employee_email,
+    employee_name,
+    cycle_id,
+    cycle_name,
+    performance_rating,
+    performance_rating_value,
+    final_narrative_employee_visible,
+    finalized_at,
+    released_at,
+    archived_by,
+    source
+  )
+  select
+    p.employee_id,
+    v_email,
+    v_name,
+    p.cycle_id,
+    rc.name,
+    p.performance_rating,
+    p.performance_rating_value,
+    p.final_narrative_employee_visible,
+    p.finalized_at,
+    p.released_at,
+    p_deleted_by,
+    'hard_delete'
+  from public.cycle_employee_summary_public p
+  left join public.review_cycles rc
+    on rc.id = p.cycle_id
+  where p.employee_id = p_employee_id
+    and not exists (
+      select 1
+      from public.employee_cycle_history_archive a
+      where a.employee_id = p.employee_id
+        and a.cycle_id = p.cycle_id
+        and a.source = 'hard_delete'
+    );
+
+  delete from public.admin_users
+  where id = p_employee_id;
+
+  delete from auth.users
+  where id = p_employee_id;
+
+  if not found then
+    raise exception 'auth user not found for id %', p_employee_id;
+  end if;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."admin_hard_delete_employee"("p_employee_id" "uuid", "p_deleted_by" "uuid") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."admin_release_employee_cycle"("p_cycle_id" "uuid", "p_employee_id" "uuid") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -83,28 +197,108 @@ declare
   v_row_id uuid;
   v_before jsonb;
   v_after  jsonb;
+  v_auto_narrative text;
 begin
+  -- Must be authenticated
   if v_actor is null then
     raise exception 'Not authenticated';
   end if;
 
-  -- Admin gate
-  if not exists (select 1 from public.admin_users au where au.id = v_actor) then
+  -- Must be admin
+  if not exists (
+    select 1
+    from public.admin_users au
+    where au.id = v_actor
+  ) then
     raise exception 'Not authorized';
   end if;
 
-  -- Capture BEFORE state (for audit)
+  -- Build an employee-visible narrative from committed reviews (if needed)
+  select
+    coalesce(
+      string_agg(
+        trim(both from
+          case
+            when r.reviewer_type = 'self' then 'Self review:' || chr(10) || coalesce(r.summary_employee_visible, '')
+            when r.reviewer_type = 'primary' then 'Primary review:' || chr(10) || coalesce(r.summary_employee_visible, '')
+            when r.reviewer_type = 'secondary' then 'Secondary review:' || chr(10) || coalesce(r.summary_employee_visible, '')
+            else initcap(r.reviewer_type::text) || ' review:' || chr(10) || coalesce(r.summary_employee_visible, '')
+          end
+        ),
+        chr(10) || chr(10)
+        order by
+          case r.reviewer_type
+            when 'primary' then 1
+            when 'secondary' then 2
+            when 'self' then 3
+            else 9
+          end,
+          r.updated_at desc
+      ),
+      ''
+    )
+  into v_auto_narrative
+  from public.reviews r
+  where r.cycle_id = p_cycle_id
+    and r.employee_id = p_employee_id
+    and r.status in ('submitted', 'finalized')
+    and r.narrative_share_with_employee = true
+    and coalesce(r.summary_employee_visible, '') <> '';
+
+  -- Ensure summary row exists (upsert guard)
+  insert into public.cycle_employee_summary_public (
+    cycle_id,
+    employee_id,
+    performance_rating,
+    final_narrative_employee_visible,
+    finalized_at,
+    created_at,
+    updated_at
+  )
+  values (
+    p_cycle_id,
+    p_employee_id,
+    'MEETS'::performance_rating_enum,
+    coalesce(nullif(v_auto_narrative, ''), ''),  -- placeholder if still empty, we will block release below
+    now(),
+    now(),
+    now()
+  )
+  on conflict (cycle_id, employee_id)
+  do update set
+    -- keep existing rating if already set
+    performance_rating = coalesce(public.cycle_employee_summary_public.performance_rating, excluded.performance_rating),
+
+    -- if existing narrative is empty, fill from auto narrative
+    final_narrative_employee_visible =
+      case
+        when coalesce(nullif(public.cycle_employee_summary_public.final_narrative_employee_visible, ''), '') <> '' then
+          public.cycle_employee_summary_public.final_narrative_employee_visible
+        when coalesce(nullif(v_auto_narrative, ''), '') <> '' then
+          v_auto_narrative
+        else
+          public.cycle_employee_summary_public.final_narrative_employee_visible
+      end,
+
+    finalized_at = coalesce(public.cycle_employee_summary_public.finalized_at, now()),
+    updated_at = now();
+
+  -- Capture BEFORE state for audit
   select to_jsonb(p)
     into v_before
   from public.cycle_employee_summary_public p
   where p.cycle_id = p_cycle_id
     and p.employee_id = p_employee_id;
 
-  if v_before is null then
-    raise exception 'No public summary row found for cycle %, employee %', p_cycle_id, p_employee_id;
+  -- Hard stop if there is nothing employee-visible to show
+  if coalesce(nullif((v_before->>'final_narrative_employee_visible')::text, ''), '') = '' then
+    raise exception
+      'Cannot release. No employee-visible narrative is available for cycle %, employee %',
+      p_cycle_id,
+      p_employee_id;
   end if;
 
-  -- Release (idempotent: do not overwrite if already released)
+  -- Release (idempotent)
   update public.cycle_employee_summary_public p
      set released_at = coalesce(p.released_at, now()),
          released_by = coalesce(p.released_by, v_actor),
@@ -115,18 +309,18 @@ begin
              when 'NEEDS_DEVELOPMENT' then 1
              else null
            end,
-         updated_at  = now()
+         updated_at = now()
    where p.cycle_id = p_cycle_id
      and p.employee_id = p_employee_id
   returning p.id into v_row_id;
 
-  -- Capture AFTER state (for audit)
+  -- Capture AFTER state for audit
   select to_jsonb(p)
     into v_after
   from public.cycle_employee_summary_public p
   where p.id = v_row_id;
 
-  -- Audit row (matches your schema)
+  -- Write audit log
   insert into public.audit_log (
     actor_user_id,
     action,
@@ -145,7 +339,6 @@ begin
     v_after,
     now()
   );
-
 end;
 $$;
 
@@ -155,22 +348,39 @@ ALTER FUNCTION "public"."admin_release_employee_cycle"("p_cycle_id" "uuid", "p_e
 
 CREATE OR REPLACE FUNCTION "public"."admin_reopen_review"("p_review_id" "uuid") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
-    SET "search_path" TO 'public'
     AS $$
+declare
+  v_employee_id uuid;
+  v_cycle_id uuid;
+  v_released_at timestamptz;
 begin
-  if not public.is_admin(auth.uid()) then
-    raise exception 'Not authorized';
-  end if;
-
-  update public.reviews
-     set status = 'draft',
-         submitted_at = null,
-         updated_at = now()
-   where id = p_review_id;
+  -- find review context
+  select employee_id, cycle_id
+    into v_employee_id, v_cycle_id
+  from reviews
+  where id = p_review_id;
 
   if not found then
     raise exception 'Review not found';
   end if;
+
+  -- check release state
+  select released_at
+    into v_released_at
+  from cycle_employee_summary_public
+  where employee_id = v_employee_id
+    and cycle_id = v_cycle_id;
+
+  if v_released_at is not null then
+    raise exception 'Cannot reopen review after release';
+  end if;
+
+  -- reopen review
+  update reviews
+     set status = 'draft',
+         submitted_at = null,
+         updated_at = now()
+   where id = p_review_id;
 end;
 $$;
 
@@ -678,6 +888,36 @@ $$;
 ALTER FUNCTION "public"."is_admin"("p_user_id" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."is_admin_user"() RETURNS boolean
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    AS $$
+  select exists (
+    select 1
+    from public.admin_users au
+    where au.id = auth.uid()
+  );
+$$;
+
+
+ALTER FUNCTION "public"."is_admin_user"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."is_reviewer_for_employee"("emp_id" "uuid") RETURNS boolean
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    AS $$
+  select exists (
+    select 1
+    from public.review_assignments ra
+    where ra.employee_id = emp_id
+      and ra.reviewer_id = auth.uid()
+      and ra.is_active = true
+  );
+$$;
+
+
+ALTER FUNCTION "public"."is_reviewer_for_employee"("emp_id" "uuid") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."make_employee_code"("p_role" "text") RETURNS "text"
     LANGUAGE "plpgsql"
     AS $$
@@ -724,10 +964,41 @@ ALTER FUNCTION "public"."next_employee_number"("p_role" "text") OWNER TO "postgr
 CREATE OR REPLACE FUNCTION "public"."prevent_review_edits_after_submit"() RETURNS "trigger"
     LANGUAGE "plpgsql"
     AS $$
+declare
+  is_released boolean;
 begin
   if old.status = 'submitted' then
-    -- allow admins to reopen by changing status only
+
+    -- allow admins to reopen by changing status only (existing behavior preserved)
     if new.status is distinct from old.status and public.is_admin(auth.uid()) then
+      return new;
+    end if;
+
+    -- determine whether this employee-cycle has been released
+    select exists (
+      select 1
+      from public.cycle_employee_summary_public p
+      where p.cycle_id = old.cycle_id
+        and p.employee_id = old.employee_id
+        and p.released_at is not null
+    )
+    into is_released;
+
+    -- allow admins to toggle ONLY narrative_share_with_employee after submit,
+    -- but ONLY until released
+    if public.is_admin(auth.uid())
+       and not is_released
+       and new.narrative_share_with_employee is distinct from old.narrative_share_with_employee
+       and new.status is not distinct from old.status
+       and new.assignment_id is not distinct from old.assignment_id
+       and new.cycle_id is not distinct from old.cycle_id
+       and new.employee_id is not distinct from old.employee_id
+       and new.reviewer_id is not distinct from old.reviewer_id
+       and new.reviewer_type is not distinct from old.reviewer_type
+       and new.summary_employee_visible is not distinct from old.summary_employee_visible
+       and new.submitted_at is not distinct from old.submitted_at
+       and new.finalized_at is not distinct from old.finalized_at
+    then
       return new;
     end if;
 
@@ -746,13 +1017,24 @@ CREATE OR REPLACE FUNCTION "public"."prevent_score_edits_after_submit"() RETURNS
     LANGUAGE "plpgsql"
     AS $$
 declare
-  review_status text;
+  v_status public.review_status;
 begin
-  select status into review_status
-  from public.reviews
-  where id = new.review_id;
+  select r.status
+    into v_status
+  from public.reviews r
+  where r.id = new.review_id;
 
-  if review_status = 'submitted' then
+  if v_status = 'submitted' then
+    -- Never allow changing the actual input scores after submission
+    if new.category_scores is distinct from old.category_scores then
+      raise exception 'Scores cannot be edited after review submission';
+    end if;
+
+    -- Allow updating only derived fields, but ONLY for admins (server-side finalize/calibration path)
+    if public.is_admin(auth.uid()) then
+      return new;
+    end if;
+
     raise exception 'Scores cannot be edited after review submission';
   end if;
 
@@ -952,6 +1234,16 @@ CREATE TABLE IF NOT EXISTS "public"."admin_users" (
 ALTER TABLE "public"."admin_users" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."app_settings" (
+    "key" "text" NOT NULL,
+    "value" "text",
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."app_settings" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."audit_log" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "actor_user_id" "uuid" NOT NULL,
@@ -976,7 +1268,6 @@ CREATE TABLE IF NOT EXISTS "public"."cycle_employee_outcomes" (
     "final_score" numeric GENERATED ALWAYS AS ((COALESCE("computed_weighted_score", (0)::numeric) + "calibration_adjustment")) STORED,
     "final_rating" "text",
     "summary_employee_visible_final" "text",
-    "summary_admin_private" "text",
     "released_at" timestamp with time zone,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
@@ -1029,6 +1320,32 @@ CREATE TABLE IF NOT EXISTS "public"."cycle_employee_summary_public" (
 ALTER TABLE "public"."cycle_employee_summary_public" OWNER TO "postgres";
 
 
+CREATE OR REPLACE VIEW "public"."cycle_employee_summary_employee_view" AS
+ SELECT "id",
+    "cycle_id",
+    "employee_id",
+        CASE
+            WHEN ("released_at" IS NOT NULL) THEN "performance_rating"
+            ELSE NULL::"public"."performance_rating"
+        END AS "performance_rating",
+        CASE
+            WHEN ("released_at" IS NOT NULL) THEN "final_narrative_employee_visible"
+            ELSE NULL::"text"
+        END AS "final_narrative_employee_visible",
+    "finalized_at",
+    "released_at",
+    "created_at",
+    "updated_at",
+    "released_by",
+    "performance_rating_value",
+    "summary_employee_visible",
+    "final_score"
+   FROM "public"."cycle_employee_summary_public";
+
+
+ALTER VIEW "public"."cycle_employee_summary_employee_view" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."cycle_reviewer_rules" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "cycle_id" "uuid" NOT NULL,
@@ -1062,6 +1379,27 @@ CREATE TABLE IF NOT EXISTS "public"."employee_code_counters" (
 
 
 ALTER TABLE "public"."employee_code_counters" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."employee_cycle_history_archive" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "employee_id" "uuid" NOT NULL,
+    "employee_email" "text",
+    "employee_name" "text",
+    "cycle_id" "uuid" NOT NULL,
+    "cycle_name" "text",
+    "performance_rating" "public"."performance_rating",
+    "performance_rating_value" smallint,
+    "final_narrative_employee_visible" "text",
+    "finalized_at" timestamp with time zone,
+    "released_at" timestamp with time zone,
+    "archived_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "archived_by" "uuid",
+    "source" "text" DEFAULT 'hard_delete'::"text" NOT NULL
+);
+
+
+ALTER TABLE "public"."employee_cycle_history_archive" OWNER TO "postgres";
 
 
 CREATE OR REPLACE VIEW "public"."employee_cycle_results_view" AS
@@ -1201,16 +1539,20 @@ CREATE TABLE IF NOT EXISTS "public"."reviews" (
     "reviewer_type" "public"."reviewer_type" NOT NULL,
     "status" "public"."review_status" DEFAULT 'draft'::"public"."review_status" NOT NULL,
     "summary_employee_visible" "text",
-    "summary_reviewer_private" "text",
     "submitted_at" timestamp with time zone,
     "finalized_at" timestamp with time zone,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "narrative_share_with_employee" boolean DEFAULT true NOT NULL,
     CONSTRAINT "reviews_assignment_alignment" CHECK (("reviewer_id" IS NOT NULL))
 );
 
 
 ALTER TABLE "public"."reviews" OWNER TO "postgres";
+
+
+COMMENT ON COLUMN "public"."reviews"."narrative_share_with_employee" IS 'Admin toggle: can be changed after submit and before employee-cycle release. If false, employee will not see summary_employee_visible even after release.';
+
 
 
 CREATE OR REPLACE VIEW "public"."reviews_employee_view" AS
@@ -1220,13 +1562,18 @@ CREATE OR REPLACE VIEW "public"."reviews_employee_view" AS
     "employee_id",
     "reviewer_type",
     "status",
-    "summary_employee_visible",
+        CASE
+            WHEN "narrative_share_with_employee" THEN "summary_employee_visible"
+            ELSE NULL::"text"
+        END AS "summary_employee_visible",
     "submitted_at",
     "finalized_at",
     "created_at",
     "updated_at"
    FROM "public"."reviews" "r"
-  WHERE (("employee_id" = "auth"."uid"()) AND ("finalized_at" IS NOT NULL));
+  WHERE (("employee_id" = "auth"."uid"()) AND (EXISTS ( SELECT 1
+           FROM "public"."cycle_employee_summary_public" "p"
+          WHERE (("p"."cycle_id" = "r"."cycle_id") AND ("p"."employee_id" = "r"."employee_id") AND ("p"."released_at" IS NOT NULL)))));
 
 
 ALTER VIEW "public"."reviews_employee_view" OWNER TO "postgres";
@@ -1282,6 +1629,11 @@ ALTER TABLE ONLY "public"."admin_users"
 
 
 
+ALTER TABLE ONLY "public"."app_settings"
+    ADD CONSTRAINT "app_settings_pkey" PRIMARY KEY ("key");
+
+
+
 ALTER TABLE ONLY "public"."audit_log"
     ADD CONSTRAINT "audit_log_pkey" PRIMARY KEY ("id");
 
@@ -1329,6 +1681,11 @@ ALTER TABLE ONLY "public"."cycle_rubrics"
 
 ALTER TABLE ONLY "public"."employee_code_counters"
     ADD CONSTRAINT "employee_code_counters_pkey" PRIMARY KEY ("job_role_id");
+
+
+
+ALTER TABLE ONLY "public"."employee_cycle_history_archive"
+    ADD CONSTRAINT "employee_cycle_history_archive_pkey" PRIMARY KEY ("id");
 
 
 
@@ -1456,6 +1813,14 @@ CREATE INDEX "idx_cycle_rubrics_cycle" ON "public"."cycle_rubrics" USING "btree"
 
 
 CREATE INDEX "idx_cycle_rubrics_role" ON "public"."cycle_rubrics" USING "btree" ("job_role_id");
+
+
+
+CREATE INDEX "idx_employee_cycle_history_archive_cycle" ON "public"."employee_cycle_history_archive" USING "btree" ("cycle_id");
+
+
+
+CREATE INDEX "idx_employee_cycle_history_archive_employee" ON "public"."employee_cycle_history_archive" USING "btree" ("employee_id");
 
 
 
@@ -1724,6 +2089,14 @@ ALTER TABLE ONLY "public"."rubrics"
 
 
 
+CREATE POLICY "admin update app_settings" ON "public"."app_settings" FOR UPDATE TO "authenticated" USING ((EXISTS ( SELECT 1
+   FROM "public"."admin_users" "au"
+  WHERE ("au"."id" = "auth"."uid"())))) WITH CHECK ((EXISTS ( SELECT 1
+   FROM "public"."admin_users" "au"
+  WHERE ("au"."id" = "auth"."uid"()))));
+
+
+
 ALTER TABLE "public"."admin_users" ENABLE ROW LEVEL SECURITY;
 
 
@@ -1735,9 +2108,24 @@ CREATE POLICY "admin_users_admin_only_write" ON "public"."admin_users" TO "authe
 
 
 
+CREATE POLICY "admins can read employee archive" ON "public"."employee_cycle_history_archive" FOR SELECT TO "authenticated" USING ("public"."is_admin"());
+
+
+
 CREATE POLICY "admins can read employees" ON "public"."employees" FOR SELECT USING ((EXISTS ( SELECT 1
    FROM "public"."admin_users" "au"
   WHERE ("au"."id" = "auth"."uid"()))));
+
+
+
+ALTER TABLE "public"."app_settings" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "app_settings_admin_write" ON "public"."app_settings" TO "authenticated" USING ("public"."is_admin"()) WITH CHECK ("public"."is_admin"());
+
+
+
+CREATE POLICY "app_settings_read_all" ON "public"."app_settings" FOR SELECT TO "authenticated" USING (true);
 
 
 
@@ -1791,6 +2179,9 @@ CREATE POLICY "cycle_rubrics_read_authed" ON "public"."cycle_rubrics" FOR SELECT
 
 
 
+ALTER TABLE "public"."employee_cycle_history_archive" ENABLE ROW LEVEL SECURITY;
+
+
 ALTER TABLE "public"."employees" ENABLE ROW LEVEL SECURITY;
 
 
@@ -1819,6 +2210,10 @@ CREATE POLICY "job_roles_read_all" ON "public"."job_roles" FOR SELECT TO "authen
 
 
 
+CREATE POLICY "no direct client writes to archive" ON "public"."employee_cycle_history_archive" TO "authenticated" USING (false) WITH CHECK (false);
+
+
+
 ALTER TABLE "public"."profiles" ENABLE ROW LEVEL SECURITY;
 
 
@@ -1827,6 +2222,10 @@ CREATE POLICY "profiles_insert_self_or_admin" ON "public"."profiles" FOR INSERT 
 
 
 CREATE POLICY "profiles_select_self_or_admin" ON "public"."profiles" FOR SELECT TO "authenticated" USING ((("id" = "auth"."uid"()) OR "public"."is_admin"("auth"."uid"())));
+
+
+
+CREATE POLICY "profiles_select_self_or_assigned_employee" ON "public"."profiles" FOR SELECT USING ((("id" = "auth"."uid"()) OR "public"."is_reviewer_for_employee"("id") OR "public"."is_admin_user"()));
 
 
 
@@ -1839,6 +2238,10 @@ CREATE POLICY "public_summary_admin_all" ON "public"."cycle_employee_summary_pub
 
 
 CREATE POLICY "public_summary_employee_select" ON "public"."cycle_employee_summary_public" FOR SELECT USING ((("employee_id" = "auth"."uid"()) AND ("finalized_at" IS NOT NULL)));
+
+
+
+CREATE POLICY "read app_settings" ON "public"."app_settings" FOR SELECT TO "authenticated" USING (true);
 
 
 
@@ -1894,6 +2297,18 @@ CREATE POLICY "review_scores_reviewer_write" ON "public"."review_scores" FOR INS
 
 
 
+CREATE POLICY "reviewer can read assigned employees" ON "public"."employees" FOR SELECT TO "authenticated" USING ((EXISTS ( SELECT 1
+   FROM "public"."review_assignments" "ra"
+  WHERE (("ra"."employee_id" = "employees"."id") AND ("ra"."reviewer_id" = "auth"."uid"()) AND ("ra"."is_active" = true)))));
+
+
+
+CREATE POLICY "reviewer can read summary rows for assigned employees" ON "public"."cycle_employee_summary_public" FOR SELECT TO "authenticated" USING ((EXISTS ( SELECT 1
+   FROM "public"."review_assignments" "ra"
+  WHERE (("ra"."cycle_id" = "cycle_employee_summary_public"."cycle_id") AND ("ra"."employee_id" = "cycle_employee_summary_public"."employee_id") AND ("ra"."reviewer_id" = "auth"."uid"()) AND ("ra"."is_active" = true)))));
+
+
+
 ALTER TABLE "public"."reviews" ENABLE ROW LEVEL SECURITY;
 
 
@@ -1929,10 +2344,20 @@ CREATE POLICY "summary_primary_reviewer_select" ON "public"."cycle_employee_summ
 
 
 
+CREATE POLICY "users_can_select_own_profile" ON "public"."profiles" FOR SELECT USING (("id" = "auth"."uid"()));
+
+
+
 GRANT USAGE ON SCHEMA "public" TO "postgres";
 GRANT USAGE ON SCHEMA "public" TO "anon";
 GRANT USAGE ON SCHEMA "public" TO "authenticated";
 GRANT USAGE ON SCHEMA "public" TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."admin_hard_delete_employee"("p_employee_id" "uuid", "p_deleted_by" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."admin_hard_delete_employee"("p_employee_id" "uuid", "p_deleted_by" "uuid") TO "anon";
+GRANT ALL ON FUNCTION "public"."admin_hard_delete_employee"("p_employee_id" "uuid", "p_deleted_by" "uuid") TO "service_role";
 
 
 
@@ -2019,6 +2444,18 @@ REVOKE ALL ON FUNCTION "public"."is_admin"("p_user_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."is_admin"("p_user_id" "uuid") TO "anon";
 GRANT ALL ON FUNCTION "public"."is_admin"("p_user_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."is_admin"("p_user_id" "uuid") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."is_admin_user"() TO "anon";
+GRANT ALL ON FUNCTION "public"."is_admin_user"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."is_admin_user"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."is_reviewer_for_employee"("emp_id" "uuid") TO "anon";
+GRANT ALL ON FUNCTION "public"."is_reviewer_for_employee"("emp_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."is_reviewer_for_employee"("emp_id" "uuid") TO "service_role";
 
 
 
@@ -2112,6 +2549,12 @@ GRANT ALL ON TABLE "public"."admin_users" TO "service_role";
 
 
 
+GRANT ALL ON TABLE "public"."app_settings" TO "anon";
+GRANT ALL ON TABLE "public"."app_settings" TO "authenticated";
+GRANT ALL ON TABLE "public"."app_settings" TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."audit_log" TO "anon";
 GRANT ALL ON TABLE "public"."audit_log" TO "authenticated";
 GRANT ALL ON TABLE "public"."audit_log" TO "service_role";
@@ -2136,6 +2579,12 @@ GRANT ALL ON TABLE "public"."cycle_employee_summary_public" TO "service_role";
 
 
 
+GRANT ALL ON TABLE "public"."cycle_employee_summary_employee_view" TO "anon";
+GRANT ALL ON TABLE "public"."cycle_employee_summary_employee_view" TO "authenticated";
+GRANT ALL ON TABLE "public"."cycle_employee_summary_employee_view" TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."cycle_reviewer_rules" TO "anon";
 GRANT ALL ON TABLE "public"."cycle_reviewer_rules" TO "authenticated";
 GRANT ALL ON TABLE "public"."cycle_reviewer_rules" TO "service_role";
@@ -2151,6 +2600,12 @@ GRANT ALL ON TABLE "public"."cycle_rubrics" TO "service_role";
 GRANT ALL ON TABLE "public"."employee_code_counters" TO "anon";
 GRANT ALL ON TABLE "public"."employee_code_counters" TO "authenticated";
 GRANT ALL ON TABLE "public"."employee_code_counters" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."employee_cycle_history_archive" TO "anon";
+GRANT ALL ON TABLE "public"."employee_cycle_history_archive" TO "authenticated";
+GRANT ALL ON TABLE "public"."employee_cycle_history_archive" TO "service_role";
 
 
 

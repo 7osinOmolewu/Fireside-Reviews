@@ -434,7 +434,7 @@ There must be no duplicate generated type files.
 ---
 
 # Schema Snapshot
-
+Requires Node >= 20.17.0 for Supabase CLI.
 Export snapshot:
 
 npx supabase db dump --schema public --file schema.sql
@@ -487,7 +487,204 @@ Never modify production schema manually.
 - Regenerate types after schema changes
 - Regenerate schema snapshot only when exporting baseline
 
+### Node Version Requirement (Supabase CLI)
+
+Some Supabase CLI operations require a newer Node runtime than older local installs.
+
+If you encounter errors such as:
+
+npm ERR! code EBADENGINE  
+Required: {"node":"^20.17.0 || >=22.9.0"}  
+Actual: {"node":"v20.11.1"}
+
+Upgrade Node using `nvm`:
+nvm install 20.17.0
+nvm use 20.17.0
+
+Then verify:
+node -v
+
+After upgrading, Supabase CLI commands should work normally:
+npx supabase db dump --schema public -f supabase/schema.sql
+npx supabase gen types typescript --project-id <project-id> --schema public > lib/database.types.ts
+
+
+This issue is related to Supabase CLI dependency requirements, not the Fireside Reviews project itself.
 ---
+---
+
+# Latest Session Update: Admin UX, Auth, Archives, and Hard Delete
+
+## UI / Navigation
+
+Completed a broader UI rewire across reviewer and admin surfaces.
+
+### Reviewer / App Shell
+- `/reviews` remains the main reviewer landing page
+- Left navigation updated to:
+  - `Dashboard` → `/reviews`
+  - `My Performance Review` → `/employee`
+- Removed `View My Results` from the top-right user menu
+- Added left-rail `Pending Reviews` list
+  - shows only assignments pending reviewer completion/submission
+  - scoped to current globally active cycle resolution
+  - clicking employee name opens the same assignment detail page as `Open review`
+- Reviews page retitled in UI to:
+  - `Pending Reviews`
+  - description reflects active review queue
+
+### Admin Navigation
+Admin menu reordered to better match operational workflow:
+
+1. Overview
+2. Job Families
+3. Cycles
+4. Employees
+5. Archives
+6. Assignments
+
+## Auth / Login
+
+Auth surface expanded beyond magic link.
+
+### Supported login flows
+- Google OAuth
+- Email + password
+- Forgot password
+- Reset password
+- Admin invite flow for first-time password users
+
+### Notes
+- Existing `app/auth/callback/route.ts` was preserved because it correctly:
+  - exchanges auth code for session
+  - ensures profile exists
+  - preserves role state
+  - routes user by role
+- Login page now supports:
+  - Google sign-in
+  - email/password sign-in
+  - password visibility toggle
+- Reset password page now supports:
+  - password visibility toggle
+  - success-only final state after password update
+
+## Employees Admin Page
+
+`/admin/employees` was fully redesigned to match the Fireside design system.
+
+### Improvements
+- Added proper field labels in Add Employee form:
+  - Name
+  - Email
+  - Job Family
+  - Hire Date
+- Removed redundant `Back to Admin`
+- Preserved `Next: Assignments` as workflow CTA
+- Reworked employee list into card-based layout
+- Improved edit mode presentation and action hierarchy
+- Added employee delete action in UI
+
+## Employee Hard Delete
+
+Hard delete is now supported for live employee records.
+
+### Live records removed
+- `auth.users`
+- `profiles`
+- `employees`
+- `review_assignments`
+- `reviews`
+- `review_scores`
+
+### Preserved history behavior
+Live cycle summary/history rows are not retained in place, because they cascade on employee delete.
+
+Instead, preserved history is copied into:
+
+- `public.employee_cycle_history_archive`
+
+### Archive preserves
+Per employee, per cycle:
+- employee name
+- employee email
+- cycle id / cycle name
+- performance rating
+- performance rating value
+- final employee-visible narrative
+- finalized timestamp
+- released timestamp
+- archived timestamp
+- archived by
+- source
+
+### Implementation
+- Archive-first delete flow implemented through:
+  - `public.admin_hard_delete_employee(...)`
+- Admin delete route now calls that function from server-side admin API flow
+- Delete path validated using rollback-first SQL testing, then live UI/API testing
+
+## Archives Admin View
+
+Added new admin page:
+
+- `/admin/archives`
+
+### Behavior
+- Read-only archive of deleted employee review history
+- Grouped by deleted employee
+- Collapsed row shows:
+  - employee
+  - email
+  - number of archived cycles
+  - archived date
+  - deleted by
+- Expanded view shows per-cycle details
+- Per-cycle layout simplified to:
+  - cycle name
+  - final rating
+  - final narrative
+  - finalized / released / archived timestamps
+- Removed numeric `value` from visible archive UI
+- Expand/collapse uses chevron-style up/down icons
+
+## Archive Access / RLS
+
+Archive table required explicit admin read access.
+
+### Current expectation
+Admin-only archive visibility is enforced for:
+- `employee_cycle_history_archive`
+
+## New / Updated Backend Elements
+
+### New table
+- `public.employee_cycle_history_archive`
+
+### New SQL function
+- `public.admin_hard_delete_employee(p_employee_id uuid, p_deleted_by uuid)`
+
+### Updated route behavior
+- `app/api/admin/employees/[id]/route.ts`
+  - supports `PATCH`
+  - supports `DELETE`
+
+## Important Operational Notes
+
+- Archive page currently uses newly added archive table, so `lib/database.types.ts` should be regenerated after schema export refresh
+- `schema.sql` should be updated from the current project state
+- Employee delete behavior is now intentionally destructive for live records, with preserved cycle history stored separately in archive
+- Archive UI is read-only and intended for admin audit/reference only
+
+## Current State After This Session
+
+- Reviews UI stable
+- Employee view stable
+- App shell/navigation significantly improved
+- Admin employees page redesigned
+- Auth surface expanded and usable
+- Hard delete implemented and tested
+- Archive history implemented and visible in admin
+- Admin panel evolution continuing page by page
 
 # Important Testing Rule
 
