@@ -1,3 +1,30 @@
+# START HERE
+
+This is a database-authoritative performance review system.
+
+Key rules:
+- Supabase Postgres is the source of truth
+- All business logic lives in SQL (RLS, triggers, functions)
+- Frontend mirrors DB state — it does not define it
+- Do NOT hardcode roles, permissions, or visibility
+
+## Run locally
+
+git clone <repo>
+cd fireside-reviews
+npm install
+npm run dev
+
+## Required setup
+
+- Create `.env.local`
+- Add Supabase project URL + anon key
+
+## Important
+
+- Types are generated from DB:
+  npx supabase gen types typescript --local > lib/database.types.ts
+  
 # Fireside Reviews
 
 Fireside Reviews is a role-based performance review system built with:
@@ -14,6 +41,7 @@ All workflow locking, release logic, scoring, and visibility rules are enforced 
 The frontend mirrors database state. It does not define it.
 
 ---
+
 
 # Current Status
 
