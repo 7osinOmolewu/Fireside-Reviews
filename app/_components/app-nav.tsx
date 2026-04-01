@@ -35,7 +35,7 @@ const adminNav: NavItem[] = [
   { label: "Job Families", href: "/admin/job-families", icon: "jobFamilies", adminOnly: true },
   { label: "Cycles", href: "/admin/cycles", icon: "cycles", adminOnly: true },
   { label: "Employees", href: "/admin/employees", icon: "employees", adminOnly: true },
-  { label: "Assignments", href: "/admin/assignments", icon: "assignments", adminOnly: true },
+  { label: "Review Operations", href: "/admin/assignments", icon: "assignments", adminOnly: true },
   { label: "Archives", href: "/admin/archives", icon: "archives", adminOnly: true },
 ];
 

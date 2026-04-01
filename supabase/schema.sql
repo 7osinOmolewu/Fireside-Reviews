@@ -188,6 +188,91 @@ $$;
 ALTER FUNCTION "public"."admin_hard_delete_employee"("p_employee_id" "uuid", "p_deleted_by" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."admin_preview_employee_cycle_summary"("p_cycle_id" "uuid", "p_employee_id" "uuid", "p_calibration_adjustment" integer DEFAULT 0) RETURNS TABLE("base_score" numeric, "calibration_adjustment" integer, "final_score" numeric, "performance_rating" "public"."performance_rating")
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_actor uuid := auth.uid();
+  v_job_role_id uuid;
+  v_rubric_id text;
+  v_primary_review_id uuid;
+  v_scores jsonb;
+  v_base numeric;
+  v_final numeric;
+begin
+  if v_actor is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  if not public.is_admin(v_actor) then
+    raise exception 'Not authorized';
+  end if;
+
+  select e.job_role_id
+    into v_job_role_id
+  from public.employees e
+  where e.id = p_employee_id;
+
+  if v_job_role_id is null then
+    raise exception 'Employee job_role_id not found for employee_id=%', p_employee_id;
+  end if;
+
+  select r.id
+    into v_rubric_id
+  from public.rubrics r
+  where r.role_id = v_job_role_id
+    and r.is_active = true
+  order by r.version desc
+  limit 1;
+
+  if v_rubric_id is null then
+    raise exception 'Active rubric not found for job_role_id=%', v_job_role_id;
+  end if;
+
+  select rv.id
+    into v_primary_review_id
+  from public.reviews rv
+  where rv.cycle_id = p_cycle_id
+    and rv.employee_id = p_employee_id
+    and rv.reviewer_type = 'primary'
+    and rv.status in ('submitted', 'finalized')
+  order by rv.updated_at desc
+  limit 1;
+
+  if v_primary_review_id is null then
+    raise exception 'Primary review not found or not submitted for employee=% in cycle=%',
+      p_employee_id, p_cycle_id;
+  end if;
+
+  select rs.category_scores
+    into v_scores
+  from public.review_scores rs
+  where rs.review_id = v_primary_review_id;
+
+  if v_scores is null then
+    raise exception 'Primary review has no score record. review_id=%', v_primary_review_id;
+  end if;
+
+  v_base := public.compute_weighted_score(v_rubric_id, v_scores);
+
+  v_final := v_base + coalesce(p_calibration_adjustment, 0);
+  if v_final > 100 then v_final := 100; end if;
+  if v_final < 0 then v_final := 0; end if;
+
+  return query
+  select
+    v_base,
+    coalesce(p_calibration_adjustment, 0),
+    v_final,
+    public.score_to_rating(v_final);
+end;
+$$;
+
+
+ALTER FUNCTION "public"."admin_preview_employee_cycle_summary"("p_cycle_id" "uuid", "p_employee_id" "uuid", "p_calibration_adjustment" integer) OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."admin_release_employee_cycle"("p_cycle_id" "uuid", "p_employee_id" "uuid") RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -258,18 +343,15 @@ begin
   values (
     p_cycle_id,
     p_employee_id,
-    'MEETS'::performance_rating_enum,
-    coalesce(nullif(v_auto_narrative, ''), ''),  -- placeholder if still empty, we will block release below
+    'MEETS'::public.performance_rating,
+    coalesce(nullif(v_auto_narrative, ''), ''),
     now(),
     now(),
     now()
   )
   on conflict (cycle_id, employee_id)
   do update set
-    -- keep existing rating if already set
     performance_rating = coalesce(public.cycle_employee_summary_public.performance_rating, excluded.performance_rating),
-
-    -- if existing narrative is empty, fill from auto narrative
     final_narrative_employee_visible =
       case
         when coalesce(nullif(public.cycle_employee_summary_public.final_narrative_employee_visible, ''), '') <> '' then
@@ -279,7 +361,6 @@ begin
         else
           public.cycle_employee_summary_public.final_narrative_employee_visible
       end,
-
     finalized_at = coalesce(public.cycle_employee_summary_public.finalized_at, now()),
     updated_at = now();
 
@@ -2358,6 +2439,12 @@ GRANT USAGE ON SCHEMA "public" TO "service_role";
 REVOKE ALL ON FUNCTION "public"."admin_hard_delete_employee"("p_employee_id" "uuid", "p_deleted_by" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."admin_hard_delete_employee"("p_employee_id" "uuid", "p_deleted_by" "uuid") TO "anon";
 GRANT ALL ON FUNCTION "public"."admin_hard_delete_employee"("p_employee_id" "uuid", "p_deleted_by" "uuid") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."admin_preview_employee_cycle_summary"("p_cycle_id" "uuid", "p_employee_id" "uuid", "p_calibration_adjustment" integer) TO "anon";
+GRANT ALL ON FUNCTION "public"."admin_preview_employee_cycle_summary"("p_cycle_id" "uuid", "p_employee_id" "uuid", "p_calibration_adjustment" integer) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."admin_preview_employee_cycle_summary"("p_cycle_id" "uuid", "p_employee_id" "uuid", "p_calibration_adjustment" integer) TO "service_role";
 
 
 

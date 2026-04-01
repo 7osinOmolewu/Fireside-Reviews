@@ -306,7 +306,7 @@ export default function EmployeePage() {
           {/* History */}
           <div className="rounded-2xl border border-orange-100/70 bg-[#fffdfb]/60 p-4 shadow-sm">
             <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold text-slate-900">Released history</div>
+              <div className="text-sm font-semibold text-slate-900">All Released Cycles</div>
               <div className="text-xs text-slate-500">
                 {summaries.length > 0 ? `${summaries.length} cycle(s)` : ""}
               </div>

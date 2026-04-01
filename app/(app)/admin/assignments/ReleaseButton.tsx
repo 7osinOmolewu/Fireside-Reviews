@@ -6,15 +6,23 @@ type Props = {
   cycleId: string;
   employeeId: string;
   releasedAt: string | null;
+  disabled?: boolean;
   onReleased?: (releasedAt: string) => void;
 };
 
-export function ReleaseButton({ cycleId, employeeId, releasedAt, onReleased }: Props) {
+export function ReleaseButton({
+  cycleId,
+  employeeId,
+  releasedAt,
+  disabled,
+  onReleased,
+}: Props) {
   const [loading, setLoading] = useState(false);
   const isReleased = useMemo(() => Boolean(releasedAt), [releasedAt]);
+  const isDisabled = Boolean(disabled) || isReleased || loading;
 
   async function onClick() {
-    if (isReleased || loading) return;
+    if (isDisabled) return;
     setLoading(true);
 
     try {
@@ -36,18 +44,13 @@ export function ReleaseButton({ cycleId, employeeId, releasedAt, onReleased }: P
     }
   }
 
+  const className = isDisabled
+    ? "inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-100 px-4 text-sm font-semibold text-slate-400 shadow-sm"
+    : "inline-flex h-10 items-center justify-center rounded-xl border border-orange-200 bg-white px-4 text-sm font-semibold text-slate-900 shadow-sm hover:bg-orange-50";
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={isReleased || loading}
-      className={`rounded px-3 py-1 text-sm ${
-        isReleased
-          ? "cursor-not-allowed bg-gray-200 text-gray-600"
-          : "bg-black text-white hover:opacity-90"
-      }`}
-    >
-      {isReleased ? "Released" : loading ? "Releasing..." : "Release Review"}
+    <button type="button" onClick={onClick} disabled={isDisabled} className={className}>
+      {isReleased ? "Released" : loading ? "Releasing..." : "Release"}
     </button>
   );
 }

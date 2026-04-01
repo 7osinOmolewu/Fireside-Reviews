@@ -1,5 +1,5 @@
 // lib/types/reviews.ts
-import type { Database } from "@/supabase/types/database.types";
+import type { Database } from "@/lib/database.types";
 
 export type ReviewerType = Database["public"]["Enums"]["reviewer_type"];
 

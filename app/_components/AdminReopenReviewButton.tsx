@@ -17,7 +17,9 @@ export function AdminReopenReviewButton({
   async function onReopen() {
     if (disabled) return;
 
-    const ok = window.confirm("Reopen this submitted review? The reviewer will be able to edit and resubmit.");
+    const ok = window.confirm(
+      "Reopen this submitted review? The reviewer will be able to edit and resubmit."
+    );
     if (!ok) return;
 
     setErr(null);
@@ -44,27 +46,23 @@ export function AdminReopenReviewButton({
   const isDisabled = Boolean(disabled) || loading;
 
   return (
-    <div style={{ display: "grid", gap: 6 }}>
-      <span title={title} style={{ display: "inline-block" }}>
+    <div className="flex flex-col gap-1.5">
+      <span title={title} className="inline-block">
         <button
+          type="button"
           onClick={onReopen}
           disabled={isDisabled}
-          style={{
-            padding: "8px 12px",
-            borderRadius: 10,
-            border: "1px solid #ddd",
-            background: "white",
-            cursor: isDisabled ? "not-allowed" : "pointer",
-            fontWeight: 700,
-            opacity: isDisabled ? 0.55 : 1,
-            width: "fit-content",
-          }}
+          className={
+            isDisabled
+              ? "inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-100 px-4 text-sm font-semibold text-slate-400 shadow-sm"
+              : "inline-flex h-10 items-center justify-center rounded-xl border border-orange-200 bg-white px-4 text-sm font-semibold text-slate-900 shadow-sm hover:bg-orange-50"
+          }
         >
           {loading ? "Reopening..." : "Reopen"}
         </button>
       </span>
 
-      {err ? <div style={{ fontSize: 12, color: "#b91c1c" }}>{err}</div> : null}
+      {err ? <div className="text-xs text-red-600">{err}</div> : null}
     </div>
   );
 }

@@ -169,41 +169,42 @@ export default async function AdminLandingPage() {
             <div className="text-sm font-semibold text-slate-900">System snapshot</div>
             <Badge label={`${totalCycleCount} total cycle(s)`} tone="neutral" />
             <Badge label={`${openCycleCount} open cycle(s)`} tone={openCycleCount > 0 ? "success" : "neutral"} />
-            <Badge label="Workflow stable" tone="success" />
-            <Badge label="UI rewire in progress" tone="warning" />
           </div>
         </div>
 
         <div className="grid gap-4 xl:grid-cols-2">
           <AdminCard
-            eyebrow="Priority"
-            title="Assignments"
-            description="Review and manage reviewer assignments, activation state, and operational review routing."
+            eyebrow="Current Cycle"
+            title="Review Operations"
+            description="Track review progress, manage assignments, and process employee reviews for the active cycle."
             href="/admin/assignments"
           />
+
           <AdminCard
-            eyebrow="Priority"
+            eyebrow="Current Cycle"
             title="Cycles"
-            description="Create, manage, and monitor review cycles, release state, and overall review timing."
+            description="Create and manage review cycles, set the active cycle, and control timing."
             href="/admin/cycles"
           />
+
           <AdminCard
-            eyebrow="Directory"
+            eyebrow="People"
             title="Employees"
-            description="Manage employee records and review-related metadata that supports assignments and results."
+            description="Manage employee records, roles, and access, with entry into individual review workflows."
             href="/admin/employees"
           />
+
           <AdminCard
-            eyebrow="Configuration"
-            title="Job Families"
-            description="Maintain dynamic job-family structures and supporting review configuration without hardcoding."
+            eyebrow="Structure"
+            title="Roles & Rubrics"
+            description="Define job roles and associated performance standards used during reviews."
             href="/admin/job-families"
           />
 
           <AdminCard
             eyebrow="History"
             title="Archives"
-            description="Review preserved cycle ratings and narratives for employees who were permanently deleted."
+            description="Access historical performance records for employees removed from the system."
             href="/admin/archives"
           />
         </div>
